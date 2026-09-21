@@ -30,6 +30,8 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
           cp secrets.defaults.properties secrets.properties
           if [ -n "$TMDB_API_KEY" ]; then
@@ -40,6 +42,12 @@ jobs:
           fi
           if [ -n "$TRAKT_CLIENT_SECRET" ]; then
             sed -i "s|^TRAKT_CLIENT_SECRET=.*|TRAKT_CLIENT_SECRET=$TRAKT_CLIENT_SECRET|" secrets.properties
+          fi
+          if [ -n "$TELEGRAM_API_ID" ]; then
+            sed -i "s|^TELEGRAM_API_ID=.*|TELEGRAM_API_ID=$TELEGRAM_API_ID|" secrets.properties
+          fi
+          if [ -n "$TELEGRAM_API_HASH" ]; then
+            sed -i "s|^TELEGRAM_API_HASH=.*|TELEGRAM_API_HASH=$TELEGRAM_API_HASH|" secrets.properties
           fi
 
       - name: Grant execute permission for gradlew
