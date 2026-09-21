@@ -56,6 +56,16 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Derive Android version from release tag
+        run: |
+          version_name="${GITHUB_REF_NAME#v}"
+          if [ -z "$version_name" ]; then
+            echo "Could not derive versionName from tag $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "ARVIO_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
+          echo "ARVIO_VERSION_CODE=$((317000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+
       - name: Validate release signing secrets
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -84,7 +94,10 @@ jobs:
             > keystore.properties
 
       - name: Build Release APK
-        run: ./gradlew assembleSideloadRelease --no-daemon
+        run: >-
+          ./gradlew assembleSideloadRelease --no-daemon
+          -ParvioVersionName="$ARVIO_VERSION_NAME"
+          -ParvioVersionCode="$ARVIO_VERSION_CODE"
 
       - name: Upload APK to Release
         uses: softprops/action-gh-release@v2
