@@ -23,6 +23,8 @@ val hasDiscordSdk = discordSdkAar.isFile
 val includeX86Abis = providers.gradleProperty("includeX86Abis")
     .orNull
     ?.toBooleanStrictOrNull() == true
+val updateGithubOwner = localBuildValue("GITHUB_OWNER").ifBlank { "ProdigyV21" }
+val updateGithubRepo = localBuildValue("GITHUB_REPO").ifBlank { "ARVIO" }
 
 android {
     namespace = "com.arflix.tv"
@@ -39,8 +41,8 @@ android {
         targetSdk = 36
         versionCode = 317
         versionName = "2.0.0"
-        buildConfigField("String", "GITHUB_OWNER", "\"ProdigyV21\"")
-        buildConfigField("String", "GITHUB_REPO", "\"ARVIO\"")
+        buildConfigField("String", "GITHUB_OWNER", "\"${escapeBuildConfigString(updateGithubOwner)}\"")
+        buildConfigField("String", "GITHUB_REPO", "\"${escapeBuildConfigString(updateGithubRepo)}\"")
         buildConfigField("Boolean", "FEATURE_PLUGINS_ENABLED", "false")
         // Use the same resolution for generated values and release validation.
         buildConfigField("String", "TELEGRAM_API_ID", "\"${escapeBuildConfigString(localSecretValue("TELEGRAM_API_ID"))}\"")
@@ -498,6 +500,17 @@ secrets {
     ignoreList.add("TELEGRAM_API_HASH")
 }
 
+fun localBuildValue(name: String): String {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        val properties = Properties()
+        localPropertiesFile.reader(Charsets.UTF_8).use { properties.load(it) }
+        properties.getProperty(name)?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    }
+    providers.gradleProperty(name).orNull?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    providers.environmentVariable(name).orNull?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
+    return ""
+}
 fun localSecretValue(name: String): String {
     val secretsFile = rootProject.file("secrets.properties")
     if (secretsFile.exists()) {

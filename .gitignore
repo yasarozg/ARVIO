@@ -171,3 +171,4 @@ _tmp_tv_perf/
 /.playback-fixtures/
 graphify-out/
 skills-lock.json
+local.properties
