@@ -13,7 +13,10 @@ jobs:
   build:
     name: Build APK
     runs-on: ubuntu-latest
-
+    env:
+      # Public updater coordinates. These are intentionally not GitHub secrets.
+      GITHUB_OWNER: yasarozg
+      GITHUB_REPO: ARVIO
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -52,6 +55,33 @@ jobs:
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
+      - name: Validate release signing secrets
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          : "${KEYSTORE_BASE64:?Missing KEYSTORE_BASE64 repository secret}"
+          : "${KEYSTORE_PASSWORD:?Missing KEYSTORE_PASSWORD repository secret}"
+          : "${KEY_ALIAS:?Missing KEY_ALIAS repository secret}"
+          : "${KEY_PASSWORD:?Missing KEY_PASSWORD repository secret}"
+
+      - name: Prepare production signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/arvio-release.keystore"
+          printf '%s\n' \
+            "storeFile=$GITHUB_WORKSPACE/arvio-release.keystore" \
+            "storePassword=$KEYSTORE_PASSWORD" \
+            "keyAlias=$KEY_ALIAS" \
+            "keyPassword=$KEY_PASSWORD" \
+            > keystore.properties
 
       - name: Build Release APK
         run: ./gradlew assembleSideloadRelease --no-daemon
