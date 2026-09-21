@@ -61,4 +61,6 @@
     <string name="add_later">Daha sonra izlemek için film ve dizi ekle</string>
     <string name="sources_available">kaynak mevcut</string>
     <string name="ends_at">Bitiş</string>
+    <string name="buffering_level">Arabelleğe alma seviyesi</string>
+    <string name="buffering_level_desc">Oynatmadan önce hazırlanacak video miktarını belirler. Yüksek seviyeler takılmayı azaltır ancak daha geç başlar.</string>
 </resources>

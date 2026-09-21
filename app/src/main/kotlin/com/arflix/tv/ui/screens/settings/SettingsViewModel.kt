@@ -13,6 +13,8 @@ import androidx.lifecycle.viewModelScope
 import com.arflix.tv.R
 import com.arflix.tv.server.AiKeyConfigServer
 import com.arflix.tv.ui.screens.player.SubtitleFontOption
+import com.arflix.tv.ui.screens.player.BUFFERING_LEVEL_KEY
+import com.arflix.tv.ui.screens.player.BufferingLevel
 import com.arflix.tv.ui.screens.player.subtitles.SubtitleAiModel
 import com.arflix.tv.util.AppLogger
 import com.arflix.tv.util.DeviceIpAddress
@@ -182,6 +184,7 @@ data class SettingsUiState(
     // Volume boost in decibels (0 = off, up to 15 dB). Applied via system LoudnessEnhancer
     // attached to the ExoPlayer audio session. Issue #88.
     val volumeBoostDb: Int = 0,
+    val bufferingLevel: BufferingLevel = BufferingLevel.Default,
     val showLoadingStats: Boolean = true,
     val diagnosticsSharingEnabled: Boolean = true,
     val includeSpecials: Boolean = false,
@@ -593,6 +596,7 @@ class SettingsViewModel @Inject constructor(
                 }
             }
             val volumeBoostDb = prefs[volumeBoostDbKey()]?.toIntOrNull()?.coerceIn(0, 15) ?: 0
+            val bufferingLevel = BufferingLevel.fromPreference(prefs[BUFFERING_LEVEL_KEY])
             val showLoadingStats = prefs[showLoadingStatsKey()] ?: true
             val smoothScrolling = prefs[smoothScrollingKey()] ?: true
             val vodSearchEnabled = prefs[IPTV_VOD_SEARCH_ENABLED_KEY] ?: true
@@ -691,6 +695,7 @@ class SettingsViewModel @Inject constructor(
                 showEpisodeRatings = showEpisodeRatings,
                 iptvFavoritesOnHome = iptvFavoritesOnHome,
                 volumeBoostDb = volumeBoostDb,
+                bufferingLevel = bufferingLevel,
                 showLoadingStats = showLoadingStats,
 
                 subtitleSize = subtitleSize,
@@ -1707,6 +1712,14 @@ class SettingsViewModel @Inject constructor(
             context.settingsDataStore.edit { it[com.arflix.tv.util.ACCENT_COLOR_KEY] = next }
             _uiState.value = _uiState.value.copy(accentColor = next)
             syncLocalStateToCloud(silent = true)
+        }
+    }
+
+    fun cycleBufferingLevel() {
+        val next = _uiState.value.bufferingLevel.next()
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[BUFFERING_LEVEL_KEY] = next.name }
+            _uiState.value = _uiState.value.copy(bufferingLevel = next)
         }
     }
 
@@ -3836,7 +3849,7 @@ class SettingsViewModel @Inject constructor(
         silent: Boolean,
         pushPendingLocalFirst: Boolean = true
     ): CloudRestoreResult {
-        return when (cloudSyncRepository.pullFromCloud(pushPendingLocalFirst = pushPendingLocalFirst)) {
+        return when (cloudSyncRepository.pullFromCloud(pushPendingLocalFirst = pushPendingLocalFirst, manualRequest = true)) {
             CloudSyncRepository.RestoreResult.RESTORED -> {
                 loadSettings()
                 runCatching { launcherContinueWatchingRepository.refreshForCurrentProfile() }

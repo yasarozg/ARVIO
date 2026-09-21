@@ -1730,4 +1730,6 @@
     <string name="live_sources_failed">Could not load sources. Please try again.</string>
     <string name="settings_iptv_fallback_logos">Fallback channel logos</string>
     <string name="settings_iptv_fallback_logos_desc">Use alternative artwork only when the provider logo is missing or fails to load.</string>
+    <string name="buffering_level">Buffering level</string>
+    <string name="buffering_level_desc">Controls how much video is prepared before playback. Higher levels reduce stuttering but start more slowly.</string>
 </resources>
