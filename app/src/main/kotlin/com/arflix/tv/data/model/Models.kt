@@ -134,7 +134,8 @@ data class Episode(
     val airDate: String = "",
     val isWatched: Boolean = false,
     /** Single source of truth for display, TMDB and anime-provider coordinates. */
-    val identity: EpisodeIdentity = EpisodeIdentity.canonical(seasonNumber, episodeNumber)
+    val identity: EpisodeIdentity = EpisodeIdentity.canonical(seasonNumber, episodeNumber),
+    val absoluteEpisodeNumber: Int? = null
 ) : Serializable {
     val tmdbSeasonNumber: Int get() = identity.tmdbSeason
     val tmdbEpisodeNumber: Int get() = identity.tmdbEpisode

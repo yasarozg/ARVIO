@@ -336,7 +336,8 @@ data class TmdbEpisode(
     @SerializedName("still_path") val stillPath: String? = null,
     @SerializedName("vote_average") val voteAverage: Float = 0f,
     val runtime: Int? = null,
-    @SerializedName("air_date") val airDate: String? = null
+    @SerializedName("air_date") val airDate: String? = null,
+    @SerializedName("absolute_episode_number") val absoluteEpisodeNumber: Int? = null
 )
 
 /**

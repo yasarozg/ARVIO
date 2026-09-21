@@ -2907,7 +2907,8 @@ class StreamRepository @Inject constructor(
         tmdbId: Int? = null,
         tvdbId: Int? = null,
         timeoutMs: Long = 45_000L,
-        originalTitle: String? = null
+        originalTitle: String? = null,
+        absoluteEpisodeNumber: Int? = null
     ): List<StreamSource> = withContext(Dispatchers.IO) {
         withPartialVodResults(timeoutMs.coerceIn(500L, 90_000L)) { onSources ->
             runCatching {
@@ -2919,6 +2920,7 @@ class StreamRepository @Inject constructor(
                     tmdbId = tmdbId,
                     allowNetwork = true,
                     originalTitle = originalTitle,
+                    absoluteEpisodeNumber = absoluteEpisodeNumber,
                     onSources = onSources
                 )
             }.onFailure { e ->
