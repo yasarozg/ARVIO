@@ -49,6 +49,10 @@ class CloudSyncCoordinator @Inject constructor(
     }
 
     fun start() {
+        if (CloudSyncPolicy.MANUAL_ONLY) {
+            Log.i("CloudSyncCoordinator", "Automatic cloud sync disabled: manual-only policy")
+            return
+        }
         synchronized(lifecycleLock) {
             if (!started.compareAndSet(false, true)) return
             collectorJob = scope.launch {

@@ -369,7 +369,10 @@ data class IptvCloudProfileState(
     val groupOrderSchema: Int = 0,
     val sortOrder: String = "provider",
     val playlists: List<IptvPlaylistEntry> = emptyList(),
-    val tvSession: IptvTvSessionState = IptvTvSessionState()
+    val tvSession: IptvTvSessionState = IptvTvSessionState(),
+    // Cloud snapshots intentionally retain endpoints but never IPTV usernames/passwords.
+    val credentialsExcluded: Boolean = false,
+    val epgSourcesExcluded: Boolean = false
 )
 
 data class IptvTvSessionState(
@@ -1376,6 +1379,38 @@ class IptvRepository @Inject constructor(
         return normalizeIptvInput(decoded ?: trimmed)
     }
 
+    /** Removes credentials from a cloud copy while retaining the server endpoint. */
+    internal fun redactIptvCredentialsForCloud(raw: String): String {
+        val normalized = raw.trim()
+        if (normalized.isBlank()) return ""
+        val parsed = normalized.toHttpUrlOrNull() ?: return normalized
+        val sensitiveNames = setOf("username", "user", "uname", "password", "pass", "pwd")
+        val hasSensitiveQuery = parsed.queryParameterNames.any { it.lowercase(Locale.US) in sensitiveNames }
+        val hasUserInfo = parsed.username.isNotBlank() || parsed.password.isNotBlank()
+        val isXtreamEndpoint = parsed.encodedPath.endsWith("/get.php", ignoreCase = true) ||
+            parsed.encodedPath.endsWith("/player_api.php", ignoreCase = true) ||
+            parsed.encodedPath.endsWith("/xmltv.php", ignoreCase = true)
+        if (!hasSensitiveQuery && !hasUserInfo && !isXtreamEndpoint) return normalized
+
+        val builder = parsed.newBuilder().username("").password("")
+        parsed.queryParameterNames
+            .filter { it.lowercase(Locale.US) in sensitiveNames }
+            .forEach(builder::removeAllQueryParameters)
+        val redacted = builder.build()
+        return if (isXtreamEndpoint) redacted.toXtreamBaseUrl() else redacted.toString()
+    }
+
+    private fun preserveLocalIptvCredentials(cloudUrl: String, localUrl: String?): String {
+        val local = localUrl?.trim().orEmpty()
+        if (local.isBlank() || redactIptvCredentialsForCloud(local) == local) return cloudUrl
+        val cloudEndpoint = cloudUrl.toHttpUrlOrNull() ?: return cloudUrl
+        val localEndpoint = local.toHttpUrlOrNull() ?: return cloudUrl
+        val sameEndpoint = cloudEndpoint.scheme.equals(localEndpoint.scheme, ignoreCase = true) &&
+            cloudEndpoint.host.equals(localEndpoint.host, ignoreCase = true) &&
+            cloudEndpoint.port == localEndpoint.port
+        return if (sameEndpoint) local else cloudUrl
+    }
+
     /**
      * Accept Xtream credentials in the EPG field too.
      *
@@ -2094,8 +2129,25 @@ class IptvRepository @Inject constructor(
         favoriteGroups: List<String>,
         favoriteChannels: List<String> = emptyList()
     ) {
-        val normalizedM3u = normalizeStoredIptvUrl(m3uUrl)
-        val normalizedEpgUrls = normalizeStoredEpgInputs(epgUrl)
+        val localConfig = observeConfig().first()
+        val localPrimary = localConfig.playlists.firstOrNull()
+        val localM3u = localPrimary?.m3uUrl ?: localConfig.m3uUrl
+        val normalizedM3u = normalizeStoredIptvUrl(
+            preserveLocalIptvCredentials(redactIptvCredentialsForCloud(m3uUrl), localM3u)
+        )
+        // Legacy cloud snapshots may still contain EPG URLs. Never import them;
+        // EPG Sources remain exactly as configured on this device.
+        val normalizedEpgUrls = localPrimary?.let { playlist ->
+            buildList {
+                add(playlist.epgUrl)
+                addAll(playlist.epgUrls.orEmpty())
+            }
+        }.orEmpty().ifEmpty {
+            normalizeStoredEpgInputs(localConfig.epgUrl)
+        }
+            .flatMap(::normalizeStoredEpgInputs)
+            .filter { it.isNotBlank() }
+            .distinct()
         val normalizedEpg = normalizedEpgUrls.firstOrNull().orEmpty()
         context.settingsDataStore.edit { prefs ->
             if (normalizedM3u.isBlank()) {
@@ -4377,6 +4429,13 @@ class IptvRepository @Inject constructor(
         val playlistsRaw = prefs[playlistsKeyFor(safeProfileId)].orEmpty()
         val tvSessionRaw = prefs[tvSessionKeyFor(safeProfileId)].orEmpty()
         val playlists = decodePlaylists(playlistsRaw)
+        val cloudPlaylists = playlists.map { playlist ->
+            playlist.copy(
+                m3uUrl = redactIptvCredentialsForCloud(playlist.m3uUrl),
+                epgUrl = "",
+                epgUrls = emptyList()
+            )
+        }
         val stalkerPortals = readStalkerPortalsFor(prefs, safeProfileId)
         val validSourceIds = buildSet {
             playlists.forEach { add(it.id) }
@@ -4384,10 +4443,9 @@ class IptvRepository @Inject constructor(
         }
         val primary = playlists.firstOrNull()
         val legacyM3uUrl = normalizeStoredIptvUrl(decryptConfigValue(prefs[m3uUrlKeyFor(safeProfileId)].orEmpty()))
-        val legacyEpgUrls = normalizeStoredEpgInputs(decryptConfigValue(prefs[epgUrlKeyFor(safeProfileId)].orEmpty()))
         return IptvCloudProfileState(
-            m3uUrl = primary?.m3uUrl ?: legacyM3uUrl,
-            epgUrl = primary?.epgUrl ?: legacyEpgUrls.firstOrNull().orEmpty(),
+            m3uUrl = redactIptvCredentialsForCloud(primary?.m3uUrl ?: legacyM3uUrl),
+            epgUrl = "",
             stalkerPortals = stalkerPortals,
             favoriteGroups = decodeFavoriteGroups(prefs[favoriteGroupsKeyFor(safeProfileId)].orEmpty()),
             favoriteChannels = decodeFavoriteChannels(prefs[favoriteChannelsKeyFor(safeProfileId)].orEmpty()),
@@ -4420,8 +4478,10 @@ class IptvRepository @Inject constructor(
             } else emptyList(),
             groupOrderSchema = IPTV_GROUP_ORDER_SCHEMA,
             sortOrder = normalizeIptvSortOrder(prefs[sortOrderKeyFor(safeProfileId)]),
-            playlists = playlists,
-            tvSession = decodeTvSessionState(tvSessionRaw)
+            playlists = cloudPlaylists,
+            tvSession = decodeTvSessionState(tvSessionRaw),
+            credentialsExcluded = true,
+            epgSourcesExcluded = true
         )
     }
 
@@ -4431,10 +4491,28 @@ class IptvRepository @Inject constructor(
         incomingFieldTimestamps: org.json.JSONObject? = null,
     ): Boolean {
         val safeProfileId = profileId.trim().ifBlank { "default" }
+        val localPrefs = context.settingsDataStore.data.first()
+        val localPlaylists = decodePlaylists(localPrefs[playlistsKeyFor(safeProfileId)].orEmpty())
         val previousState = exportCloudConfigForProfile(safeProfileId)
         if (previousState == state) return false
-        val normalizedM3u = normalizeStoredIptvUrl(state.m3uUrl)
-        val normalizedEpgUrls = normalizeStoredEpgInputs(state.epgUrl)
+        val cloudM3u = redactIptvCredentialsForCloud(state.m3uUrl)
+        val localPrimaryUrl = localPlaylists.firstOrNull()?.m3uUrl
+            ?: normalizeStoredIptvUrl(decryptConfigValue(localPrefs[m3uUrlKeyFor(safeProfileId)].orEmpty()))
+        val normalizedM3u = normalizeStoredIptvUrl(preserveLocalIptvCredentials(cloudM3u, localPrimaryUrl))
+        // EPG Sources are device-local: cloud restore must never add, remove or replace them.
+        val localPrimary = localPlaylists.firstOrNull()
+        val localPrimaryEpgInputs = localPrimary?.let { playlist ->
+            buildList {
+                add(playlist.epgUrl)
+                addAll(playlist.epgUrls.orEmpty())
+            }
+        }.orEmpty().ifEmpty {
+            normalizeStoredEpgInputs(decryptConfigValue(localPrefs[epgUrlKeyFor(safeProfileId)].orEmpty()))
+        }
+        val normalizedEpgUrls = localPrimaryEpgInputs
+            .flatMap(::normalizeStoredEpgInputs)
+            .filter { it.isNotBlank() }
+            .distinct()
         val normalizedEpg = normalizedEpgUrls.firstOrNull().orEmpty()
         val importedStalkerPortals = runCatching { state.stalkerPortals }
             .getOrNull()
@@ -4449,8 +4527,21 @@ class IptvRepository @Inject constructor(
             importedStalkerPortals,
             MAX_STALKER_PORTALS,
         )
+        val localPlaylistsById = localPlaylists.associateBy { it.id }
         val normalizedPlaylists = state.playlists.mapIndexed { index, playlist ->
-            normalizePlaylistEntry(playlist, index)
+            val cloudM3uUrl = redactIptvCredentialsForCloud(playlist.m3uUrl)
+            val local = localPlaylistsById[playlist.id]
+                ?: localPlaylists.firstOrNull { candidate ->
+                    preserveLocalIptvCredentials(cloudM3uUrl, candidate.m3uUrl) == candidate.m3uUrl
+                }
+                ?: localPlaylists.getOrNull(index)
+            val localEpgUrls = local?.epgUrls.orEmpty()
+            val safePlaylist = playlist.copy(
+                m3uUrl = preserveLocalIptvCredentials(cloudM3uUrl, local?.m3uUrl),
+                epgUrl = local?.epgUrl.orEmpty(),
+                epgUrls = localEpgUrls
+            )
+            normalizePlaylistEntry(safePlaylist, index)
         }.filterNotNull().take(MAX_IPTV_PLAYLISTS)
         val effectivePlaylists = normalizedPlaylists.ifEmpty {
             if (normalizedM3u.isBlank()) emptyList() else listOf(

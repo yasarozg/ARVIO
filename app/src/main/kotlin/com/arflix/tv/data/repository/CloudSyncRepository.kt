@@ -838,9 +838,9 @@ class CloudSyncRepository @Inject constructor(
             "hiddenPreinstalledCatalogs",
             JSONArray(gson.toJson(catalogRepository.getHiddenPreinstalledCatalogIdsForActiveProfile()))
         )
-        val iptvConfig = iptvRepository.observeConfig().first()
-        root.put("iptvM3uUrl", iptvConfig.m3uUrl)
-        root.put("iptvEpgUrl", iptvConfig.epgUrl)
+        val cloudIptvConfig = iptvRepository.exportCloudConfigForProfile(profileManager.getProfileIdSync())
+        root.put("iptvM3uUrl", cloudIptvConfig.m3uUrl)
+        root.put("iptvEpgUrl", cloudIptvConfig.epgUrl)
         root.put("iptvFavoriteGroups", JSONArray(gson.toJson(iptvRepository.observeFavoriteGroups().first())))
         root.put("iptvFavoriteChannels", JSONArray(gson.toJson(iptvRepository.observeFavoriteChannels().first())))
 
@@ -887,8 +887,17 @@ class CloudSyncRepository @Inject constructor(
     //  PUSH LOCAL STATE TO CLOUD
     // ══════════════════════════════════════════════════════════
 
-    suspend fun pushToCloud(force: Boolean = false): Result<Unit> = cloudSyncMutex.withLock {
-        pushToCloudLocked(force = force, allowRemoteRestoreBeforePush = !force)
+    suspend fun pushToCloud(force: Boolean = false): Result<Unit> {
+        if (CloudSyncPolicy.MANUAL_ONLY) {
+            // Automatic callers only mark local state; Settings uses
+            // pushLocalSnapshotToCloud() for an explicit user-requested upload.
+            markLocalStateDirtyNow()
+            Log.d(TAG, "Automatic cloud push skipped: manual-only policy")
+            return Result.success(Unit)
+        }
+        return cloudSyncMutex.withLock {
+            pushToCloudLocked(force = force, allowRemoteRestoreBeforePush = !force)
+        }
     }
 
     suspend fun pushLocalSnapshotToCloud(): Result<Unit> = cloudSyncMutex.withLock {
@@ -995,11 +1004,14 @@ class CloudSyncRepository @Inject constructor(
         // Field-level merge against the already-loaded remote: keep local fields we changed more
         // recently, but never overwrite a cloud field with an older local value. This is what stops
         // a stale device from reverting a peer's setting (even via the pull's pre-push).
-        val effectivePayload = if (existingRemotePayload != null) {
+        val mergedPayload = if (existingRemotePayload != null) {
             mergeSettingsByTimestamp(baseStr = trackingMerged, otherStr = existingRemotePayload).json
         } else {
             trackingMerged
         }
+        // A remote last-writer-wins merge may reintroduce credentials from an older
+        // snapshot. Redact the final wire payload as the last step before upload.
+        val effectivePayload = redactIptvCredentialsFromPayload(mergedPayload)
 
         val payloadHash = try {
             JSONObject(effectivePayload).apply { remove("updatedAt") }.toString().hashCode()
@@ -1050,6 +1062,49 @@ class CloudSyncRepository @Inject constructor(
         return result
     }
 
+    private fun redactIptvCredentialsFromPayload(payload: String): String {
+        return try {
+            val root = JSONObject(payload)
+            fun redactProfile(profile: JSONObject) {
+                if (profile.has("m3uUrl")) {
+                    profile.put("m3uUrl", iptvRepository.redactIptvCredentialsForCloud(profile.optString("m3uUrl")))
+                }
+                // EPG Sources are intentionally device-local and never leave the device.
+                profile.put("epgUrl", "")
+                val playlists = profile.optJSONArray("playlists") ?: return
+                for (index in 0 until playlists.length()) {
+                    val playlist = playlists.optJSONObject(index) ?: continue
+                    playlist.put(
+                        "m3uUrl",
+                        iptvRepository.redactIptvCredentialsForCloud(playlist.optString("m3uUrl"))
+                    )
+                    playlist.put("epgUrl", "")
+                    playlist.put("epgUrls", JSONArray())
+                }
+                profile.put("credentialsExcluded", true)
+                profile.put("epgSourcesExcluded", true)
+            }
+
+            root.optJSONObject("iptvByProfile")?.let { profiles ->
+                val profileIds = profiles.keys()
+                while (profileIds.hasNext()) {
+                    profiles.optJSONObject(profileIds.next())?.let(::redactProfile)
+                }
+            }
+            if (root.has("iptvM3uUrl")) {
+                root.put(
+                    "iptvM3uUrl",
+                    iptvRepository.redactIptvCredentialsForCloud(root.optString("iptvM3uUrl"))
+                )
+            }
+            root.put("iptvEpgUrl", "")
+            root.toString()
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            Log.w(TAG, "Failed to redact IPTV credentials from cloud payload", error)
+            throw IllegalStateException("Cloud payload could not be safely redacted", error)
+        }
+    }
     private fun mergeRemoteGroupOrder(localPayload: String, remotePayload: String): String {
         return try {
             val local = JSONObject(localPayload)
@@ -1193,7 +1248,15 @@ class CloudSyncRepository @Inject constructor(
      * Restores the full cloud state to local repositories.
      * Returns [RestoreResult] indicating what happened.
      */
-    suspend fun pullFromCloud(pushPendingLocalFirst: Boolean = true): RestoreResult = cloudSyncMutex.withLock {
+    suspend fun pullFromCloud(
+        pushPendingLocalFirst: Boolean = true,
+        manualRequest: Boolean = false
+    ): RestoreResult {
+        if (CloudSyncPolicy.MANUAL_ONLY && !manualRequest) {
+            Log.d(TAG, "Automatic cloud pull skipped: manual-only policy")
+            return RestoreResult.NO_BACKUP
+        }
+        return cloudSyncMutex.withLock {
         val hasPendingLocalChanges = hasPendingLocalChanges()
         if (pushPendingLocalFirst && hasPendingLocalChanges) {
             AppLogger.breadcrumb(
@@ -1342,6 +1405,7 @@ class CloudSyncRepository @Inject constructor(
                 )
             )
             RestoreResult.FAILED
+        }
         }
     }
 

@@ -126,6 +126,10 @@ class RealtimeSyncManager @Inject constructor(
     }
 
     fun start() {
+        if (CloudSyncPolicy.MANUAL_ONLY) {
+            Log.i(TAG, "Automatic cloud sync disabled: manual-only policy");
+            return
+        }
         if (isRunning.getAndSet(true)) return
         Log.i(TAG, "Starting realtime sync")
         if (Constants.USE_NETLIFY_CLOUD_SYNC) {
