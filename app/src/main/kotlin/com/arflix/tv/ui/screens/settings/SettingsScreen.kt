@@ -1239,6 +1239,7 @@ fun SettingsScreen(
                                                 12 -> viewModel.cycleAutoPlayMinQuality()
                                                 43 -> viewModel.cycleAutoPlayMaxQuality()
                                                 44 -> viewModel.cycleAutoPlayMaxSize()
+                                                45 -> viewModel.cycleBufferingLevel()
                                                 13 -> viewModel.setTrailerAutoPlay(!uiState.trailerAutoPlay)
                                                 14 -> viewModel.setTrailerSoundEnabled(!uiState.trailerSoundEnabled)
                                                 15 -> viewModel.cycleFrameRateMatchingMode()
