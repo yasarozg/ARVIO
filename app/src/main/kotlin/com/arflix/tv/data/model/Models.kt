@@ -143,6 +143,24 @@ data class Episode(
     val kitsuEpisodeNumber: Int? get() = identity.kitsuEpisode
 }
 
+private val ABSOLUTE_EPISODE_NAME_PATTERNS = listOf(
+    Regex("(?i)^\\s*(\\d{1,4})\\s*\\.?\\s*(?:bölüm|episode|ep)\\b"),
+    Regex("(?i)\\b(?:bölüm|episode|ep)\\s*(\\d{1,4})\\b")
+)
+
+/**
+ * Returns provider-style absolute numbering when TMDB (or an upstream proxy)
+ * supplies it. Turkish episode names such as "139. Bölüm" are a fallback for
+ * TMDB responses that omit absolute_episode_number.
+ */
+fun Episode.absoluteEpisodeNumberForVod(): Int? {
+    absoluteEpisodeNumber?.takeIf { it > 0 }?.let { return it }
+    for (pattern in ABSOLUTE_EPISODE_NAME_PATTERNS) {
+        val parsed = pattern.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
+        if (parsed > 0 && parsed != episodeNumber) return parsed
+    }
+    return null
+}
 /**
  * Cast member
  */

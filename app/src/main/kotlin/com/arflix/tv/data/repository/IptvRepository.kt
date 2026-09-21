@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.util.Log
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import com.arflix.tv.data.model.IptvChannel
@@ -168,6 +169,9 @@ private const val LargeListMemoryGuideLimit = 512
 private const val LargeListMemoryFavoriteGuideLimit = 256
 internal const val IPTV_GROUP_ORDER_SCHEMA = 3
 internal const val MAX_IPTV_PLAYLISTS = 5
+private const val VOD_MATCH_LOG_TAG = "ArvioVodMatch"
+
+internal fun canUseFlattenedEpisodeFallback(requestedSeason: Int): Boolean = requestedSeason <= 1
 
 internal fun normalizeIptvSortOrder(value: String?): String = when (value?.trim()?.lowercase()) {
     "number" -> "number"
@@ -4752,7 +4756,7 @@ class IptvRepository @Inject constructor(
 
         private fun catalogPrefKey(providerKey: String): String = "catalog_${providerKey.hashCode()}"
 
-        private val resolvedPrefKey = "resolved_episode_map"
+        private val resolvedPrefKey = "resolved_episode_map_v2"
         // v2: stores List<Int> per binding key instead of single Int.
         // Bumping the key avoids parsing failures against the legacy single-id format.
         private val seriesBindingPrefKey = "series_binding_map_v2"
@@ -4867,7 +4871,8 @@ class IptvRepository @Inject constructor(
             season: Int,
             episode: Int,
             tmdbId: Int?,
-            imdbId: String?
+            imdbId: String?,
+            absoluteEpisodeNumber: Int? = null
         ): List<ResolverCachedResolvedEpisode> {
             val normalizedShow = normalizeLookupText(showTitle)
             val normalizedTmdb = normalizeTmdbId(tmdbId)
@@ -4901,7 +4906,7 @@ class IptvRepository @Inject constructor(
                     episodes = persisted.episodes
                 }
                 val list = episodes ?: continue
-                val hits = matchEpisodes(list, season, episode)
+                val hits = matchEpisodes(list, season, episode, absoluteEpisodeNumber)
                 val best = hits.maxByOrNull { it.score } ?: continue
                 out += ResolverCachedResolvedEpisode(
                     streamId = best.episode.id,
@@ -4925,7 +4930,8 @@ class IptvRepository @Inject constructor(
             tmdbId: Int?,
             imdbId: String?,
             year: Int?,
-            allowNetwork: Boolean
+            allowNetwork: Boolean,
+            absoluteEpisodeNumber: Int? = null
         ): List<ResolverCachedResolvedEpisode> {
             val resolveStart = System.currentTimeMillis()
             System.err.println("[VOD-Resolver] resolveEpisode start: '$showTitle' S${season}E${episode} tmdb=$tmdbId imdb=$imdbId")
@@ -4970,7 +4976,7 @@ class IptvRepository @Inject constructor(
                 }
                 System.err.println("[VOD-Resolver] loadSeriesInfo for ${boundSeriesIds.size} bindings took ${System.currentTimeMillis() - bindStart}ms")
                 val boundHits = perSeriesEpisodes.flatMap { (seriesId, episodes) ->
-                    matchEpisodes(episodes, season, episode).map { hit -> seriesId to hit }
+                    matchEpisodes(episodes, season, episode, absoluteEpisodeNumber).map { hit -> seriesId to hit }
                 }
                 if (boundHits.isNotEmpty()) {
                     val resolved = boundHits
@@ -5050,7 +5056,7 @@ class IptvRepository @Inject constructor(
                         val infoStart = System.currentTimeMillis()
                         val episodes = loadSeriesInfo(providerKey, creds, candidate.entry.seriesId, allowNetwork)
                         System.err.println("[VOD-Resolver] loadSeriesInfo(${candidate.entry.seriesId}) took ${System.currentTimeMillis() - infoStart}ms, got ${episodes.size} episodes")
-                        matchEpisodes(episodes, season, episode).map { hit ->
+                        matchEpisodes(episodes, season, episode, absoluteEpisodeNumber).map { hit ->
                             Triple(candidate, hit.episode, hit.score)
                         }
                     }
@@ -5411,13 +5417,20 @@ class IptvRepository @Inject constructor(
         private fun matchEpisode(
             episodes: List<XtreamSeriesEpisode>,
             requestedSeason: Int,
-            requestedEpisode: Int
-        ): ResolverEpisodeHit? = matchEpisodes(episodes, requestedSeason, requestedEpisode).firstOrNull()
+            requestedEpisode: Int,
+            absoluteEpisodeNumber: Int? = null
+        ): ResolverEpisodeHit? = matchEpisodes(
+            episodes,
+            requestedSeason,
+            requestedEpisode,
+            absoluteEpisodeNumber
+        ).firstOrNull()
 
         private fun matchEpisodes(
             episodes: List<XtreamSeriesEpisode>,
             requestedSeason: Int,
-            requestedEpisode: Int
+            requestedEpisode: Int,
+            absoluteEpisodeNumber: Int? = null
         ): List<ResolverEpisodeHit> {
             if (episodes.isEmpty()) return emptyList()
 
@@ -5427,16 +5440,35 @@ class IptvRepository @Inject constructor(
                 return exact.map { ResolverEpisodeHit(it, score = 1000) }
             }
 
+            // Some providers flatten the whole show into season 1, for example
+            // TMDB S05E01 (absolute 139) is exposed as S01E139. This is safe only
+            // with a known absolute number and a unique flattened episode hit.
+            if (absoluteEpisodeNumber != null && absoluteEpisodeNumber > 0) {
+                val absolute = episodes.filter {
+                    it.season <= 1 && it.episode == absoluteEpisodeNumber
+                }
+                Log.d(
+                    VOD_MATCH_LOG_TAG,
+                    "series_absolute_check requested=S${requestedSeason}E${requestedEpisode} " +
+                        "absolute=$absoluteEpisodeNumber hits=${absolute.size} " +
+                        "candidates=${absolute.take(5).joinToString { it.title }}"
+                )
+                if (absolute.size == 1) {
+                    return listOf(ResolverEpisodeHit(absolute.first(), score = 920))
+                }
+            }
+
             // If provider clearly has the requested season, do not cross-match to another season.
             if (episodes.any { it.season == requestedSeason }) {
                 return emptyList()
             }
 
-            // Flattened providers sometimes expose all episodes as season 1 (or 0).
-            // Allow this only when there is a single unambiguous episode-number match.
+            // Never map S02+E01 to S01E01. Providers that flatten a show need an
+            // absolute episode lookup; reusing the per-season episode number here
+            // silently plays the wrong season.
             val sameEpisode = episodes.filter { it.episode == requestedEpisode }
             val flattened = episodes.all { it.season <= 1 }
-            if (flattened && sameEpisode.size == 1) {
+            if (canUseFlattenedEpisodeFallback(requestedSeason) && flattened && sameEpisode.size == 1) {
                 return listOf(ResolverEpisodeHit(sameEpisode.first(), score = 640))
             }
             return emptyList()
@@ -6579,7 +6611,14 @@ class IptvRepository @Inject constructor(
         val normalizedTitle = normalizeLookupText(title)
         val normalizedImdb = normalizeImdbId(imdbId)
         val normalizedTmdb = normalizeTmdbId(tmdbId)
+        val requestedEpisode = "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "lookup_start title='$title' requested=$requestedEpisode absolute=${absoluteEpisodeNumber ?: "none"} " +
+                "tmdb=${normalizedTmdb ?: "none"} imdb=${normalizedImdb ?: "none"} network=$allowNetwork"
+        )
         if (normalizedTitle.isBlank() && normalizedImdb.isNullOrBlank() && normalizedTmdb.isNullOrBlank()) {
+            Log.d(VOD_MATCH_LOG_TAG, "lookup_stop reason=no_identity requested=$requestedEpisode")
             return emptyList()
         }
         val activeProfileId = runCatching { profileManager.getProfileIdSync() }.getOrDefault("default")
@@ -6609,8 +6648,10 @@ class IptvRepository @Inject constructor(
             season = season,
             episode = episode,
             tmdbId = tmdbId,
-            imdbId = imdbId
+            imdbId = imdbId,
+            absoluteEpisodeNumber = absoluteEpisodeNumber
         )
+        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_fast_cache requested=$requestedEpisode hits=${fastResolved.size}")
         if (fastResolved.isNotEmpty()) {
             return sortVodSources(fastResolved.toSeriesVodSources())
         }
@@ -6625,8 +6666,30 @@ class IptvRepository @Inject constructor(
             allowNetwork = false,
             absoluteEpisodeNumber = absoluteEpisodeNumber
         )
+        Log.d(VOD_MATCH_LOG_TAG, "strategy=vod_catalog_cache requested=$requestedEpisode hits=${cachedVodCatalogSources.size}")
         if (cachedVodCatalogSources.isNotEmpty()) {
             return cachedVodCatalogSources
+        }
+
+        // Absolute-number providers commonly store S05E01 as S01E139 in the
+        // movie/VOD catalogue. Check that catalogue before probing every series
+        // candidate, which is both more accurate and substantially faster.
+        if (absoluteEpisodeNumber != null && allowNetwork) {
+            val absoluteVodSources = findEpisodeVodFromVodCatalogFallbackSources(
+                creds = creds,
+                title = title,
+                season = season,
+                episode = episode,
+                normalizedImdb = normalizedImdb,
+                normalizedTmdb = normalizedTmdb,
+                allowNetwork = true,
+                absoluteEpisodeNumber = absoluteEpisodeNumber
+            )
+            Log.d(
+                VOD_MATCH_LOG_TAG,
+                "strategy=absolute_vod_network requested=$requestedEpisode absolute=$absoluteEpisodeNumber hits=${absoluteVodSources.size}"
+            )
+            if (absoluteVodSources.isNotEmpty()) return absoluteVodSources
         }
 
         val cachedSeriesSources = seriesResolver.resolveEpisodeVariants(
@@ -6638,10 +6701,13 @@ class IptvRepository @Inject constructor(
             tmdbId = tmdbId,
             imdbId = imdbId,
             year = parseYear(title),
-            allowNetwork = false
+            allowNetwork = false,
+            absoluteEpisodeNumber = absoluteEpisodeNumber
         ).toSeriesVodSources()
 
+        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_cache requested=$requestedEpisode hits=${cachedSeriesSources.size}")
         if (!allowNetwork) {
+            Log.d(VOD_MATCH_LOG_TAG, "lookup_finish requested=$requestedEpisode network=false hits=${cachedSeriesSources.size}")
             return sortVodSources(cachedSeriesSources)
         }
 
@@ -6654,8 +6720,10 @@ class IptvRepository @Inject constructor(
             tmdbId = tmdbId,
             imdbId = imdbId,
             year = parseYear(title),
-            allowNetwork = true
+            allowNetwork = true,
+            absoluteEpisodeNumber = absoluteEpisodeNumber
         ).toSeriesVodSources()
+        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_network requested=$requestedEpisode hits=${networkSeriesSources.size}")
         if (networkSeriesSources.isNotEmpty()) {
             return sortVodSources(networkSeriesSources)
         }
@@ -6669,6 +6737,11 @@ class IptvRepository @Inject constructor(
             normalizedTmdb = normalizedTmdb,
             allowNetwork = true,
             absoluteEpisodeNumber = absoluteEpisodeNumber
+        )
+        Log.d(VOD_MATCH_LOG_TAG, "strategy=vod_catalog_network requested=$requestedEpisode hits=${vodCatalogSources.size}")
+        Log.i(
+            VOD_MATCH_LOG_TAG,
+            "lookup_finish requested=$requestedEpisode hits=${vodCatalogSources.size + cachedSeriesSources.size}"
         )
         return sortVodSources(vodCatalogSources + cachedSeriesSources)
     }
@@ -6713,9 +6786,18 @@ class IptvRepository @Inject constructor(
         absoluteEpisodeNumber: Int? = null
     ): List<StreamSource> {
         val normalizedTitle = normalizeLookupText(title)
+        val requestedEpisode = "S${season.toString().padStart(2, '0')}E${episode.toString().padStart(2, '0')}"
+        val catalogSource = if (allowNetwork) "network" else "cache"
         val vod = getXtreamVodStreams(creds, allowNetwork = allowNetwork, fast = true)
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "catalog_scan source=$catalogSource title='$title' requested=$requestedEpisode " +
+                "absolute=${absoluteEpisodeNumber ?: "none"} items=${vod.size}"
+        )
         if (vod.isEmpty()) return emptyList()
 
+        var acceptedLogCount = 0
+        var rejectedLogCount = 0
         val scored = vod.asSequence()
             .mapNotNull { item ->
                 val streamId = item.streamId ?: return@mapNotNull null
@@ -6728,7 +6810,26 @@ class IptvRepository @Inject constructor(
                 val hasAbsoluteEpisodeMatch = !hasExactSeasonEpisode &&
                     absoluteEpisodeNumber != null &&
                     matchesAbsoluteEpisode(name, title, absoluteEpisodeNumber)
-                if (!hasExactSeasonEpisode && !hasEpisodeOnlyMatch && !hasAbsoluteEpisodeMatch) return@mapNotNull null
+                val parsedLabel = parsedEpisode?.let { (parsedSeason, parsedNumber) ->
+                    "S${parsedSeason.toString().padStart(2, '0')}E${parsedNumber.toString().padStart(2, '0')}"
+                } ?: "none"
+                val hasRelevantEpisodeNumber = parsedEpisode?.second == episode ||
+                    episodeOnly == episode ||
+                    (absoluteEpisodeNumber != null && (
+                        parsedEpisode?.second == absoluteEpisodeNumber || episodeOnly == absoluteEpisodeNumber
+                    ))
+                if (!hasExactSeasonEpisode && !hasEpisodeOnlyMatch && !hasAbsoluteEpisodeMatch) {
+                    if (hasRelevantEpisodeNumber && rejectedLogCount < 20) {
+                        Log.d(
+                            VOD_MATCH_LOG_TAG,
+                            "candidate_reject reason=episode_mismatch name='$name' parsed=$parsedLabel " +
+                                "episodeOnly=${episodeOnly ?: "none"} requested=$requestedEpisode " +
+                                "absolute=${absoluteEpisodeNumber ?: "none"}"
+                        )
+                        rejectedLogCount++
+                    }
+                    return@mapNotNull null
+                }
 
                 val imdbScore = if (!normalizedImdb.isNullOrBlank() && normalizeImdbId(item.imdb) == normalizedImdb) 10_000 else 0
                 val tmdbScore = if (!normalizedTmdb.isNullOrBlank() && normalizeTmdbId(item.tmdb) == normalizedTmdb) 9_500 else 0
@@ -6737,31 +6838,65 @@ class IptvRepository @Inject constructor(
                 } else {
                     0
                 }
-                // For episode-only patterns (no season marker), require stronger identity if season > 1.
-                if (!hasExactSeasonEpisode && !hasAbsoluteEpisodeMatch && season > 1 && imdbScore == 0 && tmdbScore == 0) return@mapNotNull null
-                if (imdbScore == 0 && tmdbScore == 0 && titleScore <= 0) return@mapNotNull null
-                Triple(item, streamId, imdbScore + tmdbScore + titleScore)
+                val rejectionReason = when {
+                    !hasExactSeasonEpisode && !hasAbsoluteEpisodeMatch && season > 1 && imdbScore == 0 && tmdbScore == 0 ->
+                        "episode_only_needs_id"
+                    imdbScore == 0 && tmdbScore == 0 && titleScore <= 0 -> "title_or_id_mismatch"
+                    else -> null
+                }
+                if (rejectionReason != null) {
+                    if (rejectedLogCount < 20) {
+                        Log.d(
+                            VOD_MATCH_LOG_TAG,
+                            "candidate_reject reason=$rejectionReason name='$name' parsed=$parsedLabel " +
+                                "exact=$hasExactSeasonEpisode absoluteMatch=$hasAbsoluteEpisodeMatch " +
+                                "scores=title:$titleScore,tmdb:$tmdbScore,imdb:$imdbScore"
+                        )
+                        rejectedLogCount++
+                    }
+                    return@mapNotNull null
+                }
+                val totalScore = imdbScore + tmdbScore + titleScore
+                if (acceptedLogCount < 20) {
+                    Log.d(
+                        VOD_MATCH_LOG_TAG,
+                        "candidate_accept name='$name' parsed=$parsedLabel episodeOnly=${episodeOnly ?: "none"} " +
+                            "exact=$hasExactSeasonEpisode absoluteMatch=$hasAbsoluteEpisodeMatch " +
+                            "scores=title:$titleScore,tmdb:$tmdbScore,imdb:$imdbScore,total:$totalScore"
+                    )
+                    acceptedLogCount++
+                }
+                Triple(item, streamId, totalScore)
             }
             .sortedByDescending { it.third }
             .toList()
-        val bestScore = scored.firstOrNull()?.third ?: return emptyList()
+        val bestScore = scored.firstOrNull()?.third
+        if (bestScore == null) {
+            Log.d(VOD_MATCH_LOG_TAG, "catalog_result source=$catalogSource requested=$requestedEpisode candidates=0")
+            return emptyList()
+        }
         val minScore = maxOf(45, bestScore - 120)
-        return sortVodSources(
+        val selected = sortVodSources(
             scored
                 .asSequence()
                 .takeWhile { it.third >= minScore }
                 .mapNotNull { it.first.toEpisodeVodSource(creds, "$title S${season}E${episode}") }
                 .toList()
         )
+        Log.i(
+            VOD_MATCH_LOG_TAG,
+            "catalog_result source=$catalogSource requested=$requestedEpisode candidates=${scored.size} " +
+                "bestScore=$bestScore minScore=$minScore selected=${selected.joinToString(limit = 5) { it.source }}"
+        )
+        return selected
     }
-
     internal fun matchesAbsoluteEpisode(name: String, showTitle: String, absoluteEpisodeNumber: Int): Boolean {
         if (absoluteEpisodeNumber <= 0 || showTitle.isBlank()) return false
-        val pattern = Regex(
-            Regex.escape(showTitle.trim()) + ".*?\\b" + absoluteEpisodeNumber + "\\b",
-            RegexOption.IGNORE_CASE
-        )
-        return pattern.containsMatchIn(name)
+        val normalizedName = normalizeLookupText(name)
+        val normalizedShowTitle = normalizeLookupText(showTitle)
+        if (normalizedShowTitle.isBlank() || !normalizedName.contains(normalizedShowTitle)) return false
+        return Regex("\\b${Regex.escape(absoluteEpisodeNumber.toString())}\\b")
+            .containsMatchIn(normalizedName)
     }
     private fun XtreamVodStream.toMovieVodSource(
         creds: XtreamCredentials,

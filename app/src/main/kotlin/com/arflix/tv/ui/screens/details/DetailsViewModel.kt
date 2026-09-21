@@ -10,6 +10,7 @@ import com.arflix.tv.data.model.AddonType
 import com.arflix.tv.data.model.CastMember
 import com.arflix.tv.data.model.Episode
 import com.arflix.tv.data.model.EpisodeIdentity
+import com.arflix.tv.data.model.absoluteEpisodeNumberForVod
 import com.arflix.tv.data.model.MediaItem
 import com.arflix.tv.data.model.MediaType
 import com.arflix.tv.data.model.PersonDetails
@@ -3051,7 +3052,12 @@ class DetailsViewModel @Inject constructor(
         val itemOriginalTitle = _uiState.value.item?.originalTitle
         val absoluteEpisodeNumber = _uiState.value.episodes.firstOrNull { candidate ->
             candidate.tmdbSeasonNumber == season && candidate.tmdbEpisodeNumber == episode
-        }?.absoluteEpisodeNumber
+        }?.absoluteEpisodeNumberForVod()
+            ?: if (season != null && episode != null) {
+                mediaRepository.getAbsoluteEpisodeNumber(currentMediaId, season, episode)
+            } else {
+                null
+            }
 
         val vodSources = if (requestMediaType == MediaType.MOVIE) {
             streamRepository.resolveMovieVodSources(
