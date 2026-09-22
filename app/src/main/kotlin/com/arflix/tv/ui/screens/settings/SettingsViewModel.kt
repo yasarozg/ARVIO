@@ -184,7 +184,7 @@ data class SettingsUiState(
     // Volume boost in decibels (0 = off, up to 15 dB). Applied via system LoudnessEnhancer
     // attached to the ExoPlayer audio session. Issue #88.
     val volumeBoostDb: Int = 0,
-    val bufferingLevel: BufferingLevel = BufferingLevel.Default,
+    val bufferingLevel: BufferingLevel = BufferingLevel.Medium,
     val showLoadingStats: Boolean = true,
     val diagnosticsSharingEnabled: Boolean = true,
     val includeSpecials: Boolean = false,

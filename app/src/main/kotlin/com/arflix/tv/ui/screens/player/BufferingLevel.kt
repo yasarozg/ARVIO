@@ -2,15 +2,22 @@ package com.arflix.tv.ui.screens.player
 
 import androidx.datastore.preferences.core.stringPreferencesKey
 
-enum class BufferingLevel(val minBufferMs: Int?, val maxBufferMs: Int?, val bufferForPlaybackMs: Int?, val bufferForPlaybackAfterRebufferMs: Int?) {
-    Default(null, null, null, null),
-    Low(2_500, 5_000, 500, 1_000),
-    Medium(5_000, 7_500, 1_000, 2_000),
-    High(7_500, 10_000, 2_500, 5_000),
-    Highest(10_000, 10_000, 5_000, 10_000);
+enum class BufferingLevel(
+    val minBufferMs: Int,
+    val maxBufferMs: Int,
+    val bufferForPlaybackMs: Int,
+    val bufferForPlaybackAfterRebufferMs: Int
+) {
+    Low(5_000, 15_000, 1_000, 2_000),
+    Medium(15_000, 30_000, 2_000, 4_000),
+    High(25_000, 50_000, 3_000, 6_000),
+    Highest(35_000, 70_000, 5_000, 10_000);
+
     fun next(): BufferingLevel = entries[(ordinal + 1) % entries.size]
+
     companion object {
-        fun fromPreference(value: String?): BufferingLevel = entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: Default
+        fun fromPreference(value: String?): BufferingLevel =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) } ?: Medium
     }
 }
 
