@@ -89,6 +89,11 @@ internal fun reconcileAddonsWithCloud(
  * push it to the server, and restore cloud state to local repositories.
  * UI-specific concerns (toasts, loading indicators) are left to the ViewModels.
  */
+enum class CloudSyncProfileScope {
+    ACTIVE_PROFILE,
+    ALL_PROFILES
+}
+
 @Singleton
 class CloudSyncRepository @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -900,13 +905,20 @@ class CloudSyncRepository @Inject constructor(
         }
     }
 
-    suspend fun pushLocalSnapshotToCloud(): Result<Unit> = cloudSyncMutex.withLock {
-        pushToCloudLocked(force = true, allowRemoteRestoreBeforePush = false)
+    suspend fun pushLocalSnapshotToCloud(
+        profileScope: CloudSyncProfileScope = CloudSyncProfileScope.ALL_PROFILES
+    ): Result<Unit> = cloudSyncMutex.withLock {
+        pushToCloudLocked(
+            force = true,
+            allowRemoteRestoreBeforePush = false,
+            profileScope = profileScope
+        )
     }
 
     private suspend fun pushToCloudLocked(
         force: Boolean = false,
-        allowRemoteRestoreBeforePush: Boolean = true
+        allowRemoteRestoreBeforePush: Boolean = true,
+        profileScope: CloudSyncProfileScope = CloudSyncProfileScope.ALL_PROFILES
     ): Result<Unit> {
         val now = System.currentTimeMillis()
         if (!force && pushFailureCount > 0) {
@@ -932,7 +944,7 @@ class CloudSyncRepository @Inject constructor(
             )
             return Result.failure(IllegalStateException("Not logged in"))
         }
-        val payload = try {
+        val localPayload = try {
             buildCloudSnapshotJson()
         } catch (it: Throwable) {
             if (it is kotlinx.coroutines.CancellationException) throw it
@@ -952,6 +964,16 @@ class CloudSyncRepository @Inject constructor(
         val existingRemotePayload = authRepository.loadAccountSyncPayload()
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
+        val payload = if (profileScope == CloudSyncProfileScope.ACTIVE_PROFILE) {
+            mergeActiveProfilePayload(
+                basePayload = existingRemotePayload ?: localPayload,
+                activeProfilePayload = localPayload,
+                activeProfileId = profileRepository.getActiveProfileId().orEmpty(),
+                keepOnlyActiveProfile = existingRemotePayload == null
+            )
+        } else {
+            localPayload
+        }
         if (
             allowRemoteRestoreBeforePush &&
             existingRemotePayload != null &&
@@ -1250,7 +1272,8 @@ class CloudSyncRepository @Inject constructor(
      */
     suspend fun pullFromCloud(
         pushPendingLocalFirst: Boolean = true,
-        manualRequest: Boolean = false
+        manualRequest: Boolean = false,
+        profileScope: CloudSyncProfileScope = CloudSyncProfileScope.ALL_PROFILES
     ): RestoreResult {
         if (CloudSyncPolicy.MANUAL_ONLY && !manualRequest) {
             Log.d(TAG, "Automatic cloud pull skipped: manual-only policy")
@@ -1363,9 +1386,19 @@ class CloudSyncRepository @Inject constructor(
             return@withLock RestoreResult.NO_BACKUP
         }
 
+        val effectivePayload = if (profileScope == CloudSyncProfileScope.ACTIVE_PROFILE) {
+            mergeActiveProfilePayload(
+                basePayload = buildCloudSnapshotJson(),
+                activeProfilePayload = payload,
+                activeProfileId = profileRepository.getActiveProfileId().orEmpty()
+            )
+        } else {
+            payload
+        }
+
         val prefs = context.settingsDataStore.data.first()
         val lastAppliedHash = prefs[androidx.datastore.preferences.core.intPreferencesKey("cloud_sync_last_applied_hash")]
-        val payloadHash = payload.hashCode()
+        val payloadHash = effectivePayload.hashCode()
 
         if (lastAppliedHash == payloadHash) {
             Log.i(TAG, "Pull skipped identical payload")
@@ -1382,13 +1415,13 @@ class CloudSyncRepository @Inject constructor(
                 if (!pushPendingLocalFirst) {
                     clearStaleLocalDirtyBeforeRemoteRestore()
                 }
-                applyCloudPayload(payload)
+                applyCloudPayload(effectivePayload)
             }
-            markCloudPayloadApplied(payload, payloadHash)
-            Log.i(TAG, "Pull restored size=${payloadSizeBucket(payload)}")
+            markCloudPayloadApplied(effectivePayload, payloadHash)
+            Log.i(TAG, "Pull restored size=${payloadSizeBucket(effectivePayload)} scope=$profileScope")
             AppLogger.breadcrumb(
                 tag = "CloudSync",
-                message = "pull_restored size=${payloadSizeBucket(payload)}",
+                message = "pull_restored size=${payloadSizeBucket(effectivePayload)} scope=$profileScope",
                 severity = "info"
             )
             RestoreResult.RESTORED
@@ -1409,6 +1442,66 @@ class CloudSyncRepository @Inject constructor(
         }
     }
 
+    private fun mergeActiveProfilePayload(
+        basePayload: String,
+        activeProfilePayload: String,
+        activeProfileId: String,
+        keepOnlyActiveProfile: Boolean = false
+    ): String {
+        if (activeProfileId.isBlank()) return basePayload
+        val base = JSONObject(basePayload)
+        val source = JSONObject(activeProfilePayload)
+        val profileObjectFields = listOf(
+            "profileAvatarImagesById",
+            "profileSettingsById",
+            "traktTokens",
+            "mdbListSyncByProfile",
+            "dismissedContinueWatchingByProfile",
+            "localContinueWatchingByProfile",
+            "localWatchedMoviesByProfile",
+            "localWatchedEpisodesByProfile",
+            "catalogsByProfile",
+            "hiddenPreinstalledByProfile",
+            "hiddenAddonByProfile",
+            "hiddenHomeServerByProfile",
+            "iptvByProfile",
+            "watchlistByProfile"
+        )
+
+        profileObjectFields.forEach { field ->
+            val target = if (keepOnlyActiveProfile) {
+                JSONObject()
+            } else {
+                base.optJSONObject(field)?.let { JSONObject(it.toString()) } ?: JSONObject()
+            }
+            val sourceByProfile = source.optJSONObject(field)
+            if (sourceByProfile?.has(activeProfileId) == true) {
+                target.put(activeProfileId, sourceByProfile.get(activeProfileId))
+            }
+            base.put(field, target)
+        }
+
+        val targetProfiles = JSONArray().also { result ->
+            if (!keepOnlyActiveProfile) {
+                val current = base.optJSONArray("profiles") ?: JSONArray()
+                for (index in 0 until current.length()) {
+                    val profile = current.optJSONObject(index) ?: continue
+                    if (profile.optString("id") != activeProfileId) result.put(profile)
+                }
+            }
+        }
+        val sourceProfiles = source.optJSONArray("profiles") ?: JSONArray()
+        for (index in 0 until sourceProfiles.length()) {
+            val profile = sourceProfiles.optJSONObject(index) ?: continue
+            if (profile.optString("id") == activeProfileId) {
+                targetProfiles.put(profile)
+                break
+            }
+        }
+        base.put("profiles", targetProfiles)
+        base.put("updatedAt", source.optLong("updatedAt", System.currentTimeMillis()))
+        return base.toString()
+    }
     /**
      * Applies a cloud JSON payload to all local repositories.
      */

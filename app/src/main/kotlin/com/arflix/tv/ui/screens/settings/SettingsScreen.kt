@@ -642,7 +642,7 @@ fun SettingsScreen(
             "catalogs" -> uiState.catalogs.size + 1 // Add + Import + catalogs
             "stremio" -> stremioAddons.size + 1 // rows + refresh + add button
             "plugins" -> pluginsMaxIndex
-            "accounts" -> 16 // Includes About & Credits.
+            "accounts" -> 17 // Includes sync scope, About & Credits.
             else -> 0
         }
     }
@@ -1554,18 +1554,19 @@ fun SettingsScreen(
                                                         }
                                                     }
                                                 }
-                                                11 -> viewModel.forceCloudSyncNow()
-                                                12 -> {
+                                                11 -> viewModel.toggleCloudSyncProfileScope()
+                                                12 -> viewModel.forceCloudSyncNow()
+                                                13 -> {
                                                     if (uiState.updateStatus is com.arflix.tv.updater.UpdateStatus.ReadyToInstall) {
                                                         viewModel.installAppUpdateOrRequestPermission()
                                                     } else {
                                                         viewModel.checkForAppUpdates(force = true, showNoUpdateFeedback = true)
                                                     }
                                                 }
-                                                13 -> viewModel.setDiagnosticsSharingEnabled(!uiState.diagnosticsSharingEnabled)
-                                                14 -> openExternalUrl(context, PRIVACY_POLICY_URL)
-                                                15 -> openExternalUrl(context, ACCOUNT_DELETION_URL)
-                                                16 -> showCredits = true
+                                                14 -> viewModel.setDiagnosticsSharingEnabled(!uiState.diagnosticsSharingEnabled)
+                                                15 -> openExternalUrl(context, PRIVACY_POLICY_URL)
+                                                16 -> openExternalUrl(context, ACCOUNT_DELETION_URL)
+                                                17 -> showCredits = true
                                             }
                                         }
                                         "plugins" -> {
@@ -2136,6 +2137,7 @@ fun SettingsScreen(
                             isTraktAuthStarting = uiState.isTraktAuthStarting,
                             isTraktPolling = uiState.isTraktPolling,
                             isForceCloudSyncing = uiState.isForceCloudSyncing,
+                            cloudSyncProfileScope = uiState.cloudSyncProfileScope,
                             lastCloudSyncStatus = uiState.lastCloudSyncStatus?.localizedText(),
                             diagnosticsSharingEnabled = uiState.diagnosticsSharingEnabled,
                             isSelfUpdateSupported = uiState.isSelfUpdateSupported,
@@ -2166,6 +2168,7 @@ fun SettingsScreen(
                             trackingUiState = uiState,
                             onTrackingReadMode = viewModel::setTrackingReadMode,
                             onTrackingWriteTarget = viewModel::setTrackingWriteTarget,
+                            onCloudSyncProfileScopeToggle = viewModel::toggleCloudSyncProfileScope,
                             onForceCloudSync = { viewModel.forceCloudSyncNow() },
                             onSwitchProfile = onSwitchProfile,
                             onCheckUpdates = { viewModel.checkForAppUpdates(force = true, showNoUpdateFeedback = true) },
@@ -5398,6 +5401,21 @@ private fun MobileCloudAccountSubPage(
 
     // Section 3: MANUAL CLOUD OPERATIONS
     MobileSettingsCategory(title = stringResource(R.string.settings_section_cloud_actions)) {
+        MobileSettingsRow(
+            icon = Icons.Default.SwapVert,
+            title = stringResource(R.string.settings_cloud_sync_scope),
+            subtitle = stringResource(R.string.settings_cloud_sync_scope_desc),
+            value = stringResource(
+                if (uiState.cloudSyncProfileScope == com.arflix.tv.data.repository.CloudSyncProfileScope.ACTIVE_PROFILE) {
+                    R.string.settings_cloud_sync_scope_active
+                } else {
+                    R.string.settings_cloud_sync_scope_all
+                }
+            ),
+            isFocused = false,
+            showDivider = true,
+            onClick = viewModel::toggleCloudSyncProfileScope
+        )
         MobileSettingsRow(
             icon = Icons.Default.Sync,
             title = stringResource(R.string.settings_force_sync),
@@ -9311,6 +9329,7 @@ private fun AccountsSettings(
     ) -> Unit,
     onTrackingWriteTarget: (com.arflix.tv.data.repository.sync.SyncProvider, Boolean) -> Unit,
     isForceCloudSyncing: Boolean,
+    cloudSyncProfileScope: com.arflix.tv.data.repository.CloudSyncProfileScope,
     lastCloudSyncStatus: String?,
     diagnosticsSharingEnabled: Boolean,
     isSelfUpdateSupported: Boolean,
@@ -9321,6 +9340,7 @@ private fun AccountsSettings(
     onConnectTrakt: () -> Unit,
     onCancelTrakt: () -> Unit,
     onDisconnectTrakt: () -> Unit,
+    onCloudSyncProfileScopeToggle: () -> Unit,
     onForceCloudSync: () -> Unit,
     onSwitchProfile: () -> Unit,
     onCheckUpdates: () -> Unit,
@@ -9522,6 +9542,23 @@ private fun AccountsSettings(
         Spacer(modifier = Modifier.height(16.dp))
 
         SettingsActionRow(
+            title = stringResource(R.string.settings_cloud_sync_scope),
+            description = stringResource(R.string.settings_cloud_sync_scope_desc),
+            actionLabel = stringResource(
+                if (cloudSyncProfileScope == com.arflix.tv.data.repository.CloudSyncProfileScope.ACTIVE_PROFILE) {
+                    R.string.settings_cloud_sync_scope_active
+                } else {
+                    R.string.settings_cloud_sync_scope_all
+                }
+            ),
+            isFocused = focusedIndex == 11,
+            onClick = onCloudSyncProfileScopeToggle,
+            modifier = Modifier.settingsFocusSlot(11)
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        SettingsActionRow(
             title = stringResource(R.string.force_cloud_sync),
             description = if (isForceCloudSyncing) {
                 stringResource(R.string.settings_sync_local_cloud_now)
@@ -9533,9 +9570,9 @@ private fun AccountsSettings(
                 stringResource(R.string.settings_signin_to_force_sync)
             },
             actionLabel = if (isForceCloudSyncing) stringResource(R.string.settings_badge_syncing) else stringResource(R.string.settings_badge_sync),
-            isFocused = focusedIndex == 11,
+            isFocused = focusedIndex == 12,
             onClick = { if (!isForceCloudSyncing) onForceCloudSync() },
-            modifier = Modifier.settingsFocusSlot(11)
+            modifier = Modifier.settingsFocusSlot(12)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -9557,11 +9594,11 @@ private fun AccountsSettings(
                 updateStatus is com.arflix.tv.updater.UpdateStatus.UpdateAvailable -> stringResource(R.string.settings_badge_update)
                 else -> stringResource(R.string.settings_badge_check)
             },
-            isFocused = focusedIndex == 12,
+            isFocused = focusedIndex == 13,
             onClick = {
                 if (updateStatus is com.arflix.tv.updater.UpdateStatus.ReadyToInstall) onInstallUpdate() else onCheckUpdates()
             },
-            modifier = Modifier.settingsFocusSlot(12)
+            modifier = Modifier.settingsFocusSlot(13)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -9570,9 +9607,9 @@ private fun AccountsSettings(
             title = stringResource(R.string.settings_diagnostics_sharing),
             subtitle = stringResource(R.string.settings_diagnostics_sharing_desc),
             isEnabled = diagnosticsSharingEnabled,
-            isFocused = focusedIndex == 13,
+            isFocused = focusedIndex == 14,
             onToggle = onDiagnosticsSharingToggle,
-            modifier = Modifier.settingsFocusSlot(13)
+            modifier = Modifier.settingsFocusSlot(14)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -9581,9 +9618,9 @@ private fun AccountsSettings(
             title = stringResource(R.string.settings_privacy_policy),
             description = stringResource(R.string.settings_privacy_policy_desc),
             actionLabel = stringResource(R.string.settings_badge_open),
-            isFocused = focusedIndex == 14,
+            isFocused = focusedIndex == 15,
             onClick = onOpenPrivacy,
-            modifier = Modifier.settingsFocusSlot(14)
+            modifier = Modifier.settingsFocusSlot(15)
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -9592,18 +9629,18 @@ private fun AccountsSettings(
             title = stringResource(R.string.settings_account_data_deletion),
             description = stringResource(R.string.settings_account_data_deletion_desc),
             actionLabel = stringResource(R.string.settings_badge_open),
-            isFocused = focusedIndex == 15,
+            isFocused = focusedIndex == 16,
             onClick = onOpenDataDeletion,
-            modifier = Modifier.settingsFocusSlot(15)
+            modifier = Modifier.settingsFocusSlot(16)
         )
         Spacer(modifier = Modifier.height(16.dp))
         SettingsActionRow(
             title = stringResource(R.string.about_credits),
             description = stringResource(R.string.about_credits_description),
             actionLabel = stringResource(R.string.settings_badge_open),
-            isFocused = focusedIndex == 16,
+            isFocused = focusedIndex == 17,
             onClick = onOpenCredits,
-            modifier = Modifier.settingsFocusSlot(16)
+            modifier = Modifier.settingsFocusSlot(17)
         )
     }
 }

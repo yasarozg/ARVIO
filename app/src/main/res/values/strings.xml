@@ -1734,4 +1734,8 @@
     <string name="buffering_level_desc">Sets the maximum video buffered ahead. Default: 30 s.</string>
     <string name="buffering_level_seconds">%1$d s</string>
     <string name="player_buffering_status">Buffer: %1$d s · %2$d%%</string>
+    <string name="settings_cloud_sync_scope">Sync scope</string>
+    <string name="settings_cloud_sync_scope_desc">Profiles included in the Sync operation</string>
+    <string name="settings_cloud_sync_scope_active">Active profile</string>
+    <string name="settings_cloud_sync_scope_all">All profiles</string>
 </resources>

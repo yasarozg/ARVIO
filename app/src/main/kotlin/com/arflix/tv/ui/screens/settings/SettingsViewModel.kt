@@ -33,6 +33,7 @@ import com.arflix.tv.data.repository.AuthState
 import com.arflix.tv.data.repository.CatalogDiscoveryRepository
 import com.arflix.tv.data.repository.CatalogRepository
 import com.arflix.tv.data.repository.CollectionTemplateManifest
+import com.arflix.tv.data.repository.CloudSyncProfileScope
 import com.arflix.tv.data.repository.CloudSyncRepository
 import com.arflix.tv.data.repository.HomeServerConnection
 import com.arflix.tv.data.repository.HomeServerRepository
@@ -196,6 +197,7 @@ data class SettingsUiState(
     val showCloudEmailPasswordDialog: Boolean = false,
     val isCloudAuthWorking: Boolean = false,
     val isForceCloudSyncing: Boolean = false,
+    val cloudSyncProfileScope: CloudSyncProfileScope = CloudSyncProfileScope.ACTIVE_PROFILE,
     val lastCloudSyncStatus: SettingsMessage? = null,
     val shouldSwitchProfile: Boolean = false,
     val watchlistCount: Int = 0,
@@ -3625,6 +3627,17 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
+    fun toggleCloudSyncProfileScope() {
+        if (_uiState.value.isForceCloudSyncing) return
+        _uiState.value = _uiState.value.copy(
+            cloudSyncProfileScope = if (_uiState.value.cloudSyncProfileScope == CloudSyncProfileScope.ACTIVE_PROFILE) {
+                CloudSyncProfileScope.ALL_PROFILES
+            } else {
+                CloudSyncProfileScope.ACTIVE_PROFILE
+            }
+        )
+    }
+
     fun forceCloudSyncNow() {
         if (_uiState.value.isForceCloudSyncing) return
 
@@ -3646,11 +3659,11 @@ class SettingsViewModel @Inject constructor(
                 return@launch
             }
 
-            // Push local state first (30s timeout), then pull remote state so this device ends
-            // with the server-authoritative snapshot after upload.
+            // Scope is captured once so changing the UI cannot alter an in-flight sync.
+            val profileScope = _uiState.value.cloudSyncProfileScope
             cloudSyncRepository.markLocalStateDirtyNow()
             var pushResult = withTimeoutOrNull(30_000L) {
-                cloudSyncRepository.pushLocalSnapshotToCloud()
+                cloudSyncRepository.pushLocalSnapshotToCloud(profileScope)
             }
             if (pushResult == null) {
                 _uiState.value = _uiState.value.copy(
@@ -3664,7 +3677,7 @@ class SettingsViewModel @Inject constructor(
             if (pushResult.isFailure) {
                 delay(1200)
                 pushResult = withTimeoutOrNull(30_000L) {
-                    cloudSyncRepository.pushLocalSnapshotToCloud()
+                    cloudSyncRepository.pushLocalSnapshotToCloud(profileScope)
                 }
             }
             if (pushResult == null || pushResult.isFailure) {
@@ -3692,7 +3705,8 @@ class SettingsViewModel @Inject constructor(
             var restoreResult = withTimeoutOrNull(30_000L) {
                 restoreCloudStateToLocalInternal(
                     silent = true,
-                    pushPendingLocalFirst = false
+                    pushPendingLocalFirst = false,
+                    profileScope = profileScope
                 )
             } ?: CloudRestoreResult.FAILED
 
@@ -3701,7 +3715,8 @@ class SettingsViewModel @Inject constructor(
                 restoreResult = withTimeoutOrNull(30_000L) {
                     restoreCloudStateToLocalInternal(
                         silent = true,
-                        pushPendingLocalFirst = false
+                        pushPendingLocalFirst = false,
+                        profileScope = profileScope
                     )
                 } ?: CloudRestoreResult.FAILED
             }
@@ -3847,9 +3862,14 @@ class SettingsViewModel @Inject constructor(
 
     private suspend fun restoreCloudStateToLocalInternal(
         silent: Boolean,
-        pushPendingLocalFirst: Boolean = true
+        pushPendingLocalFirst: Boolean = true,
+        profileScope: CloudSyncProfileScope = CloudSyncProfileScope.ALL_PROFILES
     ): CloudRestoreResult {
-        return when (cloudSyncRepository.pullFromCloud(pushPendingLocalFirst = pushPendingLocalFirst, manualRequest = true)) {
+        return when (cloudSyncRepository.pullFromCloud(
+            pushPendingLocalFirst = pushPendingLocalFirst,
+            manualRequest = true,
+            profileScope = profileScope
+        )) {
             CloudSyncRepository.RestoreResult.RESTORED -> {
                 loadSettings()
                 runCatching { launcherContinueWatchingRepository.refreshForCurrentProfile() }
