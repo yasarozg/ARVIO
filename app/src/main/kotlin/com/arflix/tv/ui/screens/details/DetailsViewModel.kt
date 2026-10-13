@@ -1221,6 +1221,15 @@ class DetailsViewModel @Inject constructor(
                             ?: resumeInfo?.episode
                             ?: loadedEpisodes.firstOrNull()?.episodeNumber
                             ?: 1
+                        val prefetchAbsoluteEpisodeNumber = loadedEpisodes.firstOrNull { episode ->
+                            episode.tmdbSeasonNumber == targetSeason &&
+                                episode.tmdbEpisodeNumber == targetEpisode
+                        }?.absoluteEpisodeNumberForVod()
+                            ?: mediaRepository.resolveAbsoluteEpisodeNumberForVod(
+                                mediaId,
+                                targetSeason,
+                                targetEpisode
+                            )
                         runCatching {
                             streamRepository.prefetchEpisodeVod(
                                 imdbId = externalIds?.imdbId,
@@ -1228,7 +1237,8 @@ class DetailsViewModel @Inject constructor(
                                 episode = targetEpisode,
                                 title = titleForPrefetch,
                                 tmdbId = mediaId,
-                                originalTitle = originalTitleForPrefetch
+                                originalTitle = originalTitleForPrefetch,
+                                absoluteEpisodeNumber = prefetchAbsoluteEpisodeNumber
                             )
                         }.onFailure { logDetailsLoadFailure("episode VOD prefetch", it) }
                     }
@@ -3432,14 +3442,11 @@ class DetailsViewModel @Inject constructor(
         // Passed alongside the displayed title: a provider catalogue may list
         // the title only under its original name.
         val itemOriginalTitle = _uiState.value.item?.originalTitle
-        val absoluteEpisodeNumber = _uiState.value.episodes.firstOrNull { candidate ->
-            candidate.tmdbSeasonNumber == season && candidate.tmdbEpisodeNumber == episode
-        }?.absoluteEpisodeNumberForVod()
-            ?: if (season != null && episode != null) {
-                mediaRepository.getAbsoluteEpisodeNumber(currentMediaId, season, episode)
-            } else {
-                null
-            }
+        val absoluteEpisodeNumber = if (season != null && episode != null) {
+            mediaRepository.resolveAbsoluteEpisodeNumberForVod(currentMediaId, season, episode)
+        } else {
+            null
+        }
 
         val vodSources = if (requestMediaType == MediaType.MOVIE) {
             streamRepository.resolveMovieVodSources(

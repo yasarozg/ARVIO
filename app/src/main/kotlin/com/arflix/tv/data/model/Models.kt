@@ -162,16 +162,15 @@ private val ABSOLUTE_EPISODE_NAME_PATTERNS = listOf(
 
 /**
  * Returns provider-style absolute numbering when TMDB (or an upstream proxy)
- * supplies it. Turkish episode names such as "139. Bölüm" are a fallback for
- * TMDB responses that omit absolute_episode_number.
+ * supplies it. Turkish episode names such as "139. Bölüm" are preferred when
+ * they disagree with a stale or incorrect absolute_episode_number field.
  */
 fun Episode.absoluteEpisodeNumberForVod(): Int? {
-    absoluteEpisodeNumber?.takeIf { it > 0 }?.let { return it }
     for (pattern in ABSOLUTE_EPISODE_NAME_PATTERNS) {
         val parsed = pattern.find(name)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: continue
         if (parsed > 0 && parsed != episodeNumber) return parsed
     }
-    return null
+    return absoluteEpisodeNumber?.takeIf { it > 0 }
 }
 /**
  * Cast member

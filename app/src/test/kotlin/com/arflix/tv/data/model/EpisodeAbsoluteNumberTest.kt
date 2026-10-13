@@ -6,8 +6,14 @@ import org.junit.Test
 
 class EpisodeAbsoluteNumberTest {
     @Test
-    fun `explicit absolute number wins`() {
+    fun `explicit absolute number is used when title has no number`() {
         val episode = episode(name = "Final", absolute = 139)
+        assertEquals(139, episode.absoluteEpisodeNumberForVod())
+    }
+
+    @Test
+    fun `numbered title wins over conflicting explicit absolute number`() {
+        val episode = episode(name = "139. Bölüm", absolute = 136)
         assertEquals(139, episode.absoluteEpisodeNumberForVod())
     }
 

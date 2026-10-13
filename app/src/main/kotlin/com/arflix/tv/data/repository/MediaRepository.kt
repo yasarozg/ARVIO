@@ -29,6 +29,7 @@ import com.arflix.tv.data.model.CollectionSourceConfig
 import com.arflix.tv.data.model.CollectionSourceKind
 import com.arflix.tv.data.model.CollectionTileShape
 import com.arflix.tv.data.model.Episode
+import com.arflix.tv.data.model.absoluteEpisodeNumberForVod
 import com.arflix.tv.data.model.MediaItem
 import com.arflix.tv.data.model.MediaType
 import com.arflix.tv.data.model.PersonDetails
@@ -2408,6 +2409,42 @@ class MediaRepository @Inject constructor(
         val priorSeasons = 1 until seasonNumber
         if (priorSeasons.any { counts[it] == null }) return null
         return priorSeasons.sumOf { counts.getValue(it) } + episodeNumber
+    }
+
+    /**
+     * Resolves an absolute episode number from the actual TMDB season episode first.
+     *
+     * Player provider scans may start before the details screen has populated the
+     * season cache. Falling straight back to season totals in that window can be
+     * wrong for shows whose broadcaster numbering differs from TMDB's season
+     * counts (Kızılcık Şerbeti S05E01: 139 rather than 136).
+     */
+    suspend fun resolveAbsoluteEpisodeNumberForVod(
+        tvId: Int,
+        seasonNumber: Int,
+        episodeNumber: Int
+    ): Int? {
+        if (tvId <= 0 || seasonNumber <= 0 || episodeNumber <= 0) return null
+
+        val cachedEpisodes = peekCachedSeasonEpisodes(tvId, seasonNumber)
+        val episodes = cachedEpisodes ?: try {
+            getSeasonEpisodes(tvId, seasonNumber)
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
+            emptyList()
+        }
+        val selectedEpisode = episodes.firstOrNull { episode ->
+            episode.tmdbSeasonNumber == seasonNumber &&
+                episode.tmdbEpisodeNumber == episodeNumber
+        } ?: episodes.firstOrNull { episode ->
+            episode.seasonNumber == seasonNumber && episode.episodeNumber == episodeNumber
+        }
+        val metadataAbsolute = selectedEpisode?.absoluteEpisodeNumberForVod()
+        if (metadataAbsolute != null) {
+            return metadataAbsolute
+        }
+
+        return getAbsoluteEpisodeNumber(tvId, seasonNumber, episodeNumber)
     }
     /** Lightweight title calls used by LauncherContinueWatchingRepository. */
     suspend fun getLightweightMovieTitle(movieId: Int, language: String = contentLanguage): String? {

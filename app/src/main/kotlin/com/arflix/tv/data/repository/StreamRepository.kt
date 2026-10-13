@@ -3683,7 +3683,8 @@ class StreamRepository @Inject constructor(
         episode: Int,
         title: String = "",
         tmdbId: Int? = null,
-        originalTitle: String? = null
+        originalTitle: String? = null,
+        absoluteEpisodeNumber: Int? = null
     ) = withContext(Dispatchers.IO) {
         if (title.isBlank()) return@withContext
         try {
@@ -3693,7 +3694,8 @@ class StreamRepository @Inject constructor(
                 episode = episode,
                 imdbId = imdbId,
                 tmdbId = tmdbId,
-                originalTitle = originalTitle
+                originalTitle = originalTitle,
+                absoluteEpisodeNumber = absoluteEpisodeNumber
             )
         } catch (e: Exception) {
             if (e is CancellationException) throw e

@@ -5145,7 +5145,9 @@ class IptvRepository @Inject constructor(
 
         private fun catalogPrefKey(providerKey: String): String = "catalog_${providerKey.hashCode()}"
 
-        private val resolvedPrefKey = "resolved_episode_map_v2"
+        // v4 drops mappings produced while an API absolute number could override
+        // a conflicting explicit title such as S01E136 for requested absolute 139.
+        private val resolvedPrefKey = "resolved_episode_map_v4"
         // v2: stores List<Int> per binding key instead of single Int.
         // Bumping the key avoids parsing failures against the legacy single-id format.
         private val seriesBindingPrefKey = "series_binding_map_v2"
@@ -5235,7 +5237,8 @@ class IptvRepository @Inject constructor(
             tmdbId: Int?,
             imdbId: String?,
             year: Int?,
-            allowNetwork: Boolean
+            allowNetwork: Boolean,
+            absoluteEpisodeNumber: Int? = null
         ): ResolverCachedResolvedEpisode? = resolveEpisodeVariants(
             providerKey = providerKey,
             creds = creds,
@@ -5245,7 +5248,8 @@ class IptvRepository @Inject constructor(
             tmdbId = tmdbId,
             imdbId = imdbId,
             year = year,
-            allowNetwork = allowNetwork
+            allowNetwork = allowNetwork,
+            absoluteEpisodeNumber = absoluteEpisodeNumber
         ).firstOrNull()
 
         /**
@@ -5324,6 +5328,12 @@ class IptvRepository @Inject constructor(
             absoluteEpisodeNumber: Int? = null
         ): List<ResolverCachedResolvedEpisode> {
             val resolveStart = System.currentTimeMillis()
+            Log.d(
+                VOD_MATCH_LOG_TAG,
+                "resolver_start title='$showTitle' requested=S${season}E${episode} " +
+                    "absolute=${absoluteEpisodeNumber ?: "none"} tmdb=${tmdbId ?: "none"} " +
+                    "network=$allowNetwork"
+            )
             System.err.println("[VOD-Resolver] resolveEpisode start: '$showTitle' S${season}E${episode} tmdb=$tmdbId imdb=$imdbId")
             val normalizedShow = normalizeLookupText(showTitle)
             val normalizedTmdb = normalizeTmdbId(tmdbId)
@@ -5333,7 +5343,15 @@ class IptvRepository @Inject constructor(
                 return emptyList()
             }
 
-            val cacheKey = buildResolvedCacheKey(providerKey, normalizedTmdb, normalizedImdb, normalizedShow, season, episode)
+            val cacheKey = buildResolvedCacheKey(
+                providerKey,
+                normalizedTmdb,
+                normalizedImdb,
+                normalizedShow,
+                season,
+                episode,
+                absoluteEpisodeNumber
+            )
             val cachedResolved = readResolved(cacheKey)?.takeIf { cached ->
                 System.currentTimeMillis() - cached.savedAtMs < resolvedTtlMs
             }
@@ -5850,17 +5868,56 @@ class IptvRepository @Inject constructor(
             if (episodes.isEmpty()) return emptyList()
 
             // Exact season/episode is the only high-confidence match.
-            val exact = episodes.filter { it.season == requestedSeason && it.episode == requestedEpisode }
+            val exact = episodes.filter {
+                if (it.season != requestedSeason || it.episode != requestedEpisode) return@filter false
+                // Some Xtream panels expose the API coordinates as S05E01 while
+                // leaving the actual flattened filename/title as S01E136. Do not
+                // let that exact API match bypass a known absolute-number check.
+                val titleSeasonEpisode = extractSeasonEpisodeFromName(it.title)
+                val titleEpisodeOnly = if (titleSeasonEpisode == null) {
+                    extractEpisodeOnlyFromName(it.title)
+                } else {
+                    null
+                }
+                when {
+                    absoluteEpisodeNumber == null -> true
+                    titleSeasonEpisode != null ->
+                        titleSeasonEpisode.first == requestedSeason &&
+                            titleSeasonEpisode.second == requestedEpisode ||
+                            titleSeasonEpisode.first <= 1 &&
+                            titleSeasonEpisode.second == absoluteEpisodeNumber
+                    titleEpisodeOnly != null ->
+                        titleEpisodeOnly == absoluteEpisodeNumber ||
+                            requestedSeason <= 1 && titleEpisodeOnly == requestedEpisode
+                    else -> true
+                }
+            }
             if (exact.isNotEmpty()) {
                 return exact.map { ResolverEpisodeHit(it, score = 1000) }
             }
 
-            // Some providers flatten the whole show into season 1, for example
-            // TMDB S05E01 (absolute 139) is exposed as S01E139. This is safe only
-            // with a known absolute number and a unique flattened episode hit.
+            // Some panels retain TMDB coordinates in their API response but put
+            // the real provider coordinate in the filename, e.g. API S05E01 with
+            // title "Kizilcik Serbeti S01E139". Match that explicit label too;
+            // relying only on the API season/episode fields misses it.
             if (absoluteEpisodeNumber != null && absoluteEpisodeNumber > 0) {
                 val absolute = episodes.filter {
-                    it.season <= 1 && it.episode == absoluteEpisodeNumber
+                    val titleSeasonEpisode = extractSeasonEpisodeFromName(it.title)
+                    val titleEpisodeOnly = if (titleSeasonEpisode == null) {
+                        extractEpisodeOnlyFromName(it.title)
+                    } else {
+                        null
+                    }
+                    // An explicit filename/title coordinate is more trustworthy
+                    // than a panel field. Several panels report episode=139 for
+                    // both S01E136 and S01E139; trusting that field returns both.
+                    when {
+                        titleSeasonEpisode != null ->
+                            titleSeasonEpisode.first <= 1 &&
+                                titleSeasonEpisode.second == absoluteEpisodeNumber
+                        titleEpisodeOnly != null -> titleEpisodeOnly == absoluteEpisodeNumber
+                        else -> it.season <= 1 && it.episode == absoluteEpisodeNumber
+                    }
                 }
                 Log.d(
                     VOD_MATCH_LOG_TAG,
@@ -5868,8 +5925,8 @@ class IptvRepository @Inject constructor(
                         "absolute=$absoluteEpisodeNumber hits=${absolute.size} " +
                         "candidates=${absolute.take(5).joinToString { it.title }}"
                 )
-                if (absolute.size == 1) {
-                    return listOf(ResolverEpisodeHit(absolute.first(), score = 920))
+                if (absolute.isNotEmpty()) {
+                    return absolute.map { ResolverEpisodeHit(it, score = 920) }
                 }
             }
 
@@ -5895,7 +5952,8 @@ class IptvRepository @Inject constructor(
             imdb: String?,
             normalizedTitle: String,
             season: Int,
-            episode: Int
+            episode: Int,
+            absoluteEpisodeNumber: Int? = null
         ): String {
             return listOf(
                 providerKey,
@@ -5903,7 +5961,8 @@ class IptvRepository @Inject constructor(
                 imdb.orEmpty(),
                 normalizedTitle,
                 season.toString(),
-                episode.toString()
+                episode.toString(),
+                absoluteEpisodeNumber?.toString().orEmpty()
             ).joinToString("|")
         }
 
@@ -7370,7 +7429,10 @@ class IptvRepository @Inject constructor(
             imdbId = imdbId,
             absoluteEpisodeNumber = absoluteEpisodeNumber
         )
-        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_fast_cache requested=$requestedEpisode hits=${fastResolved.size}")
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "strategy=series_fast_cache requested=$requestedEpisode hits=${fastResolved.size}"
+        )
         if (fastResolved.isNotEmpty()) {
             return sortVodSources(fastResolved.toSeriesVodSources())
         }
@@ -7385,7 +7447,10 @@ class IptvRepository @Inject constructor(
             allowNetwork = false,
             absoluteEpisodeNumber = absoluteEpisodeNumber
         )
-        Log.d(VOD_MATCH_LOG_TAG, "strategy=vod_catalog_cache requested=$requestedEpisode hits=${cachedVodCatalogSources.size}")
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "strategy=vod_catalog_cache requested=$requestedEpisode hits=${cachedVodCatalogSources.size}"
+        )
         if (cachedVodCatalogSources.isNotEmpty()) {
             return cachedVodCatalogSources
         }
@@ -7424,7 +7489,10 @@ class IptvRepository @Inject constructor(
             absoluteEpisodeNumber = absoluteEpisodeNumber
         ).toSeriesVodSources()
 
-        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_cache requested=$requestedEpisode hits=${cachedSeriesSources.size}")
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "strategy=series_cache requested=$requestedEpisode hits=${cachedSeriesSources.size}"
+        )
         if (!allowNetwork) {
             Log.d(VOD_MATCH_LOG_TAG, "lookup_finish requested=$requestedEpisode network=false hits=${cachedSeriesSources.size}")
             return sortVodSources(cachedSeriesSources)
@@ -7442,7 +7510,10 @@ class IptvRepository @Inject constructor(
             allowNetwork = true,
             absoluteEpisodeNumber = absoluteEpisodeNumber
         ).toSeriesVodSources()
-        Log.d(VOD_MATCH_LOG_TAG, "strategy=series_network requested=$requestedEpisode hits=${networkSeriesSources.size}")
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "strategy=series_network requested=$requestedEpisode hits=${networkSeriesSources.size}"
+        )
         if (networkSeriesSources.isNotEmpty()) {
             return sortVodSources(networkSeriesSources)
         }
@@ -7457,7 +7528,10 @@ class IptvRepository @Inject constructor(
             allowNetwork = true,
             absoluteEpisodeNumber = absoluteEpisodeNumber
         )
-        Log.d(VOD_MATCH_LOG_TAG, "strategy=vod_catalog_network requested=$requestedEpisode hits=${vodCatalogSources.size}")
+        Log.d(
+            VOD_MATCH_LOG_TAG,
+            "strategy=vod_catalog_network requested=$requestedEpisode hits=${vodCatalogSources.size}"
+        )
         Log.i(
             VOD_MATCH_LOG_TAG,
             "lookup_finish requested=$requestedEpisode hits=${vodCatalogSources.size + cachedSeriesSources.size}"
@@ -7706,7 +7780,8 @@ class IptvRepository @Inject constructor(
         episode: Int,
         imdbId: String? = null,
         tmdbId: Int? = null,
-        originalTitle: String? = null
+        originalTitle: String? = null,
+        absoluteEpisodeNumber: Int? = null
     ) {
         withContext(Dispatchers.IO) {
             if (!isVodSearchEnabled()) return@withContext
@@ -7724,7 +7799,8 @@ class IptvRepository @Inject constructor(
                         tmdbId = tmdbId,
                         imdbId = imdbId,
                         year = parseYear(title),
-                        allowNetwork = true
+                        allowNetwork = true,
+                        absoluteEpisodeNumber = absoluteEpisodeNumber
                     )
                 }
             }

@@ -18,7 +18,6 @@ import com.arflix.tv.data.model.MediaType
 import com.arflix.tv.data.model.RecentPlayedSource
 import com.arflix.tv.data.model.findRecentSourceMatch
 import com.arflix.tv.data.model.EpisodeIdentity
-import com.arflix.tv.data.model.absoluteEpisodeNumberForVod
 import com.arflix.tv.data.model.SportsAddonCapabilities
 import com.arflix.tv.data.model.IptvVodSourceIds
 import com.arflix.tv.data.model.isDirectStreamUrl
@@ -1407,6 +1406,19 @@ class PlayerViewModel @Inject constructor(
                                         providerId = providerItem.id
                                     )
                                 } else {
+                                    val absoluteEpisodeNumber = if (
+                                        mediaType == MediaType.TV &&
+                                            seasonNumber != null &&
+                                            episodeNumber != null
+                                    ) {
+                                        mediaRepository.resolveAbsoluteEpisodeNumberForVod(
+                                            currentMediaId,
+                                            seasonNumber,
+                                            episodeNumber
+                                        )
+                                    } else {
+                                        null
+                                    }
                                     streamRepository.resolveEpisodeVodSources(
                                         imdbId = imdbId,
                                         season = seasonNumber ?: 1,
@@ -1416,6 +1428,7 @@ class PlayerViewModel @Inject constructor(
                                         tvdbId = currentTvdbId,
                                         timeoutMs = 3_500L,
                                         originalTitle = lookupOriginalTitle,
+                                        absoluteEpisodeNumber = absoluteEpisodeNumber,
                                         providerId = providerItem.id
                                     )
                                 }
@@ -8270,10 +8283,7 @@ class PlayerViewModel @Inject constructor(
         // the title only under its original name.
         val lookupOriginalTitle = mediaRepository.getCachedItem(mediaType, currentMediaId)?.originalTitle
         val absoluteEpisodeNumber = if (mediaType == MediaType.TV && seasonNumber != null && episodeNumber != null) {
-            mediaRepository.peekCachedSeasonEpisodes(currentMediaId, seasonNumber)
-                ?.firstOrNull { it.episodeNumber == episodeNumber }
-                ?.absoluteEpisodeNumberForVod()
-                ?: mediaRepository.getAbsoluteEpisodeNumber(currentMediaId, seasonNumber, episodeNumber)
+            mediaRepository.resolveAbsoluteEpisodeNumberForVod(currentMediaId, seasonNumber, episodeNumber)
         } else {
             null
         }
