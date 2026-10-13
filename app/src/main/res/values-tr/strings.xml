@@ -262,4 +262,8 @@
     <string name="nav_library">Kütüphane</string>
     <string name="discord_connecting">Bağlanıyor...</string>
     <string name="player_buffering_status">Arabellek: %1$d sn · %2$d%%</string>
+    <string name="settings_cloud_sync_scope">Senkronizasyon kapsamı</string>
+    <string name="settings_cloud_sync_scope_desc">Sync işlemine dahil edilecek profiller</string>
+    <string name="settings_cloud_sync_scope_active">Aktif profil</string>
+    <string name="settings_cloud_sync_scope_all">Tüm profiller</string>
 </resources>
