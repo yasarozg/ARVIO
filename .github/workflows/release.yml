@@ -28,30 +28,64 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
+      - name: Validate private Discord SDK access
+        env:
+          DISCORD_SDK_DEPLOY_KEY: ${{ secrets.DISCORD_SDK_DEPLOY_KEY }}
+        run: |
+          : "${DISCORD_SDK_DEPLOY_KEY:?Missing DISCORD_SDK_DEPLOY_KEY repository secret}"
+
+      - name: Fetch private Discord Partner SDK
+        uses: actions/checkout@v4
+        with:
+          repository: ProdigyV21/ARVIO-private-dependencies
+          ref: main
+          path: .private-dependencies
+          ssh-key: ${{ secrets.DISCORD_SDK_DEPLOY_KEY }}
+          persist-credentials: false
+
+      - name: Install Discord Partner SDK
+        run: |
+          install -d app/libs
+          install -m 0600 .private-dependencies/discord_partner_sdk.aar app/libs/discord_partner_sdk.aar
+          echo "dc7b1014ae4797e5469261d151fd26fc056524d03e42e55fd39e085f0f09e71a  app/libs/discord_partner_sdk.aar" | sha256sum --check --strict
+
       - name: Prepare secrets.properties
         env:
+          APP_ANON_KEY: ${{ secrets.APP_ANON_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_WEB_CLIENT_ID }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
           TRAKT_CLIENT_ID: ${{ secrets.TRAKT_CLIENT_ID }}
           TRAKT_CLIENT_SECRET: ${{ secrets.TRAKT_CLIENT_SECRET }}
+          MDBLIST_CLIENT_ID: ${{ secrets.MDBLIST_CLIENT_ID }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
           TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
-          cp secrets.defaults.properties secrets.properties
-          if [ -n "$TMDB_API_KEY" ]; then
-            sed -i "s|^TMDB_API_KEY=.*|TMDB_API_KEY=$TMDB_API_KEY|" secrets.properties
-          fi
-          if [ -n "$TRAKT_CLIENT_ID" ]; then
-            sed -i "s|^TRAKT_CLIENT_ID=.*|TRAKT_CLIENT_ID=$TRAKT_CLIENT_ID|" secrets.properties
-          fi
-          if [ -n "$TRAKT_CLIENT_SECRET" ]; then
-            sed -i "s|^TRAKT_CLIENT_SECRET=.*|TRAKT_CLIENT_SECRET=$TRAKT_CLIENT_SECRET|" secrets.properties
-          fi
-          if [ -n "$TELEGRAM_API_ID" ]; then
-            sed -i "s|^TELEGRAM_API_ID=.*|TELEGRAM_API_ID=$TELEGRAM_API_ID|" secrets.properties
-          fi
-          if [ -n "$TELEGRAM_API_HASH" ]; then
-            sed -i "s|^TELEGRAM_API_HASH=.*|TELEGRAM_API_HASH=$TELEGRAM_API_HASH|" secrets.properties
-          fi
+          : "${APP_ANON_KEY:?Missing APP_ANON_KEY repository secret}"
+          : "${SUPABASE_URL:?Missing SUPABASE_URL repository secret}"
+          : "${TMDB_API_KEY:?Missing TMDB_API_KEY repository secret}"
+          : "${TRAKT_CLIENT_ID:?Missing TRAKT_CLIENT_ID repository secret}"
+          : "${TRAKT_CLIENT_SECRET:?Missing TRAKT_CLIENT_SECRET repository secret}"
+          : "${MDBLIST_CLIENT_ID:?Missing MDBLIST_CLIENT_ID repository secret}"
+          : "${TELEGRAM_API_ID:?Missing TELEGRAM_API_ID repository secret}"
+          : "${TELEGRAM_API_HASH:?Missing TELEGRAM_API_HASH repository secret}"
+          printf '%s\n' \
+            "APP_ANON_KEY=$APP_ANON_KEY" \
+            "SUPABASE_URL=$SUPABASE_URL" \
+            "SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY:-$APP_ANON_KEY}" \
+            "GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID:-}" \
+            "SENTRY_DSN=${SENTRY_DSN:-disabled}" \
+            "TMDB_API_KEY=$TMDB_API_KEY" \
+            "TRAKT_CLIENT_ID=$TRAKT_CLIENT_ID" \
+            "TRAKT_CLIENT_SECRET=$TRAKT_CLIENT_SECRET" \
+            "MDBLIST_CLIENT_ID=$MDBLIST_CLIENT_ID" \
+            "DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-1501197333826637835}" \
+            "TELEGRAM_API_ID=$TELEGRAM_API_ID" \
+            "TELEGRAM_API_HASH=$TELEGRAM_API_HASH" \
+            > secrets.properties
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -64,7 +98,7 @@ jobs:
             exit 1
           fi
           echo "ARVIO_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
-          echo "ARVIO_VERSION_CODE=$((317000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "ARVIO_VERSION_CODE=$((318000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
 
       - name: Validate release signing secrets
         env:
