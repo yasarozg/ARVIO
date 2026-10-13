@@ -62,7 +62,8 @@
     <string name="sources_available">kaynak mevcut</string>
     <string name="ends_at">Bitiş</string>
     <string name="buffering_level">Arabelleğe alma seviyesi</string>
-    <string name="buffering_level_desc">Oynatmadan önce hazırlanacak video miktarını belirler. Yüksek seviyeler takılmayı azaltır ancak daha geç başlar.</string>
+    <string name="buffering_level_desc">İleriye doğru tutulacak azami video süresini belirler. Varsayılan: 30 sn.</string>
+    <string name="buffering_level_seconds">%1$d sn</string>
     <string name="library_sort_release_newest">Çıkış tarihi: önce en yenisi</string>
     <string name="library_sort_release_oldest">Yayın tarihi: önce en eski</string>
     <string name="about_credits">Hakkında ve Krediler</string>
@@ -260,4 +261,5 @@
     <string name="library_default">Kütüphane</string>
     <string name="nav_library">Kütüphane</string>
     <string name="discord_connecting">Bağlanıyor...</string>
+    <string name="player_buffering_status">Arabellek: %1$d sn · %2$d%%</string>
 </resources>

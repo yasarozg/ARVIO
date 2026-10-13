@@ -389,12 +389,11 @@ fun PlayerScreen(
     }
     val bufferingLevel by context.settingsDataStore.data
         .map { BufferingLevel.fromPreference(it[BUFFERING_LEVEL_KEY]) }
-        .collectAsState(initial = BufferingLevel.Default)
-    val playbackBufferProfile = remember(isLowRamPlaybackDevice, playbackMemoryClassMb, deviceType, bufferingLevel) {
+        .collectAsState(initial = BufferingLevel.Medium)
+    val playbackBufferProfile = remember(isLowRamPlaybackDevice, playbackMemoryClassMb, bufferingLevel) {
         buildPlaybackBufferProfile(
             memoryClassMb = playbackMemoryClassMb,
             isLowRamDevice = isLowRamPlaybackDevice,
-            isTvDevice = deviceType == com.arflix.tv.util.DeviceType.TV,
             bufferingLevel = bufferingLevel
         )
     }
@@ -457,6 +456,7 @@ fun PlayerScreen(
     var firstVideoFrameRendered by remember { mutableStateOf(false) }
     var showControls by remember { mutableStateOf(true) }
     var currentPosition by remember { mutableLongStateOf(0L) }
+    var bufferedAheadMs by remember { mutableLongStateOf(0L) }
     var duration by remember { mutableLongStateOf(0L) }
     var progress by remember { mutableFloatStateOf(0f) }
     var currentPlaybackState by remember { mutableIntStateOf(Player.STATE_IDLE) }
@@ -2778,6 +2778,9 @@ fun PlayerScreen(
             if (playerReleasedAtomic.get()) break
             if (isCasting) { delay(500); continue }
             currentPosition = runCatching { exoPlayer.currentPosition }.getOrDefault(currentPosition)
+            bufferedAheadMs = runCatching {
+                (exoPlayer.bufferedPosition - exoPlayer.currentPosition).coerceAtLeast(0L)
+            }.getOrDefault(bufferedAheadMs)
             viewModel.onPlaybackPosition(currentPosition)
             val rawDuration = exoPlayer.duration
             duration = if (rawDuration > 0L && rawDuration != C.TIME_UNSET) rawDuration else 0L
@@ -3752,17 +3755,30 @@ fun PlayerScreen(
             showSourceMenu = showSourceMenu,
             onExitPlayer = onExitPlayer,
             startupPhase = startupPhase,
-            switchNotice = switchNotice
+            switchNotice = switchNotice,
+            bufferedAheadMs = bufferedAheadMs,
+            maxBufferMs = playbackBufferProfile.maxBufferMs
         )
 
-        // Buffering indicator - only show after playback has started (mid-stream buffering)
-        // Initial buffering is handled by the main loading screen above
-        if (isBuffering && hasPlaybackStarted && uiState.selectedStreamUrl != null && !isTouchDevice) {
+        // Buffering indicator - show after playback has started on both TV and touch devices.
+        // Initial buffering is handled by the main loading screen above.
+        if (isBuffering && hasPlaybackStarted && uiState.selectedStreamUrl != null) {
             Box(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .zIndex(if (isTouchDevice) 16f else 0f),
                 contentAlignment = Alignment.Center
             ) {
-                PulsingLogo(logoUrl = uiState.logoUrl, title = uiState.title)
+                if (!isTouchDevice) {
+                    PulsingLogo(logoUrl = uiState.logoUrl, title = uiState.title)
+                }
+                BufferingProgressBadge(
+                    bufferedAheadMs = bufferedAheadMs,
+                    maxBufferMs = playbackBufferProfile.maxBufferMs,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 24.dp, end = 32.dp)
+                )
             }
         }
 
@@ -5044,7 +5060,9 @@ internal fun PlayerLoadingOverlay(
     showSourceMenu: Boolean,
     onExitPlayer: () -> Unit,
     startupPhase: Int? = null,
-    switchNotice: String? = null
+    switchNotice: String? = null,
+    bufferedAheadMs: Long = 0L,
+    maxBufferMs: Int = 0
 ) {
     if (!isInPipMode && !showSourceMenu && uiState.error == null &&
         (uiState.isLoading || uiState.selectedStreamUrl == null || !hasPlaybackStarted)
@@ -5133,6 +5151,56 @@ internal fun PlayerLoadingOverlay(
                             } else stringResource(phaseRes)
                         }
                     ?: uiState.streamLoadPhase?.localizedText()
+            )
+
+            if (uiState.selectedStreamUrl != null && maxBufferMs > 0) {
+                BufferingProgressBadge(
+                    bufferedAheadMs = bufferedAheadMs,
+                    maxBufferMs = maxBufferMs,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 24.dp, end = 32.dp)
+                        .zIndex(52f)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BufferingProgressBadge(
+    bufferedAheadMs: Long,
+    maxBufferMs: Int,
+    modifier: Modifier = Modifier
+) {
+    val safeMaxBufferMs = maxBufferMs.coerceAtLeast(1_000)
+    val progress = (bufferedAheadMs.toFloat() / safeMaxBufferMs.toFloat()).coerceIn(0f, 1f)
+    val bufferSeconds = safeMaxBufferMs / 1_000
+    val progressPercent = (progress * 100f).toInt()
+
+    Row(
+        modifier = modifier
+            .background(Color.Black.copy(alpha = 0.72f), RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 9.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        androidx.compose.material3.CircularProgressIndicator(
+            progress = { progress },
+            modifier = Modifier.size(26.dp),
+            color = Color.White,
+            trackColor = Color.White.copy(alpha = 0.2f),
+            strokeWidth = 3.dp
+        )
+        Column {
+            Text(
+                text = stringResource(
+                    R.string.player_buffering_status,
+                    bufferSeconds,
+                    progressPercent
+                ),
+                style = ArflixTypography.caption,
+                color = Color.White
             )
         }
     }
@@ -6722,8 +6790,7 @@ private data class PlaybackBufferProfile(
 private fun buildPlaybackBufferProfile(
     memoryClassMb: Int,
     isLowRamDevice: Boolean,
-    isTvDevice: Boolean,
-    bufferingLevel: BufferingLevel = BufferingLevel.Default
+    bufferingLevel: BufferingLevel = BufferingLevel.Medium
 ): PlaybackBufferProfile {
     val heapMb = memoryClassMb.coerceAtLeast(256)
     val targetMb = when {
@@ -6733,29 +6800,6 @@ private fun buildPlaybackBufferProfile(
         heapMb <= 768 -> 288
         else -> 384
     }
-    val minBufferMs = when {
-        isLowRamDevice || heapMb <= 256 -> 20_000
-        heapMb <= 384 -> 26_000
-        heapMb <= 512 -> 34_000
-        else -> 40_000
-    }
-    val maxBufferMs = when {
-        isLowRamDevice || heapMb <= 256 -> 70_000
-        heapMb <= 384 -> 95_000
-        heapMb <= 512 -> 130_000
-        else -> 170_000
-    }
-    val startBufferMs = when {
-        isTvDevice && (isLowRamDevice || heapMb <= 384) -> 550
-        isTvDevice -> 450
-        else -> 350
-    }
-    val rebufferMs = when {
-        isLowRamDevice || heapMb <= 256 -> 4_000
-        heapMb <= 384 -> 5_000
-        heapMb <= 512 -> 6_500
-        else -> 8_000
-    }
     val backBufferMs = when {
         isLowRamDevice || heapMb <= 256 -> 2_000
         heapMb <= 384 -> 3_000
@@ -6763,10 +6807,10 @@ private fun buildPlaybackBufferProfile(
     }
 
     return PlaybackBufferProfile(
-        minBufferMs = bufferingLevel.minBufferMs ?: minBufferMs,
-        maxBufferMs = bufferingLevel.maxBufferMs ?: maxBufferMs,
-        bufferForPlaybackMs = bufferingLevel.bufferForPlaybackMs ?: startBufferMs,
-        bufferForPlaybackAfterRebufferMs = bufferingLevel.bufferForPlaybackAfterRebufferMs ?: rebufferMs,
+        minBufferMs = bufferingLevel.minBufferMs,
+        maxBufferMs = bufferingLevel.maxBufferMs,
+        bufferForPlaybackMs = bufferingLevel.bufferForPlaybackMs,
+        bufferForPlaybackAfterRebufferMs = bufferingLevel.bufferForPlaybackAfterRebufferMs,
         targetBufferBytes = targetMb * 1024 * 1024,
         backBufferMs = backBufferMs,
         prioritizeTimeOverSizeThresholds = !isLowRamDevice && heapMb > 768

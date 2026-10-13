@@ -1888,6 +1888,8 @@
     <string name="settings_simkl_lists_connected">SIMKL connected</string>
     <string name="settings_simkl_open">Open SIMKL</string>
     <string name="buffering_level">Buffering level</string>
-    <string name="buffering_level_desc">Controls how much video is prepared before playback. Higher levels reduce stuttering but start more slowly.</string>
+    <string name="buffering_level_desc">Sets the maximum video buffered ahead. Default: 30 s.</string>
+    <string name="buffering_level_seconds">%1$d s</string>
+    <string name="player_buffering_status">Buffer: %1$d s · %2$d%%</string>
 </resources>
 
