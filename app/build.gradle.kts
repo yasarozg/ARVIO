@@ -61,6 +61,14 @@ val includeX86Abis = providers.gradleProperty("includeX86Abis")
     ?.toBooleanStrictOrNull() == true
 val updateGithubOwner = localBuildValue("GITHUB_OWNER").ifBlank { "ProdigyV21" }
 val updateGithubRepo = localBuildValue("GITHUB_REPO").ifBlank { "ARVIO" }
+val appVersionName = providers.gradleProperty("arvioVersionName").orNull
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
+    ?: "2.0.1"
+val appVersionCode = providers.gradleProperty("arvioVersionCode").orNull
+    ?.toIntOrNull()
+    ?.takeIf { it > 0 }
+    ?: 318
 
 android {
     namespace = "com.arflix.tv"
@@ -75,8 +83,8 @@ android {
         // Fire TV devices can be as low as Android 7.1 (API 25) or lower depending on model/OS.
         minSdk = 23
         targetSdk = 36
-        versionCode = 319
-        versionName = "2.2"
+        versionCode = appVersionCode
+        versionName = appVersionName
         buildConfigField("String", "GITHUB_OWNER", "\"${escapeBuildConfigString(updateGithubOwner)}\"")
         buildConfigField("String", "GITHUB_REPO", "\"${escapeBuildConfigString(updateGithubRepo)}\"")
         buildConfigField("Boolean", "FEATURE_PLUGINS_ENABLED", "false")
