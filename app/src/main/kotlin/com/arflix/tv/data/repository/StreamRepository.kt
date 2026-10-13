@@ -3644,6 +3644,7 @@ class StreamRepository @Inject constructor(
         tvdbId: Int? = null,
         timeoutMs: Long = 45_000L,
         originalTitle: String? = null,
+        absoluteEpisodeNumber: Int? = null,
         providerId: String? = null
     ): List<StreamSource> = withContext(Dispatchers.IO) {
         withPartialVodResults(timeoutMs.coerceIn(500L, 90_000L)) { onSources ->
@@ -3656,6 +3657,7 @@ class StreamRepository @Inject constructor(
                     tmdbId = tmdbId,
                     allowNetwork = true,
                     originalTitle = originalTitle,
+                    absoluteEpisodeNumber = absoluteEpisodeNumber,
                     onSources = onSources,
                     allowedProviderIds = streamIntegrationRepository.enabledProviderIds(StreamIntegrationType.IPTV_VOD, providerId)
                 )

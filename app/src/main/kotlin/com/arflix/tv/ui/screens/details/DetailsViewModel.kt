@@ -3431,6 +3431,9 @@ class DetailsViewModel @Inject constructor(
         // Passed alongside the displayed title: a provider catalogue may list
         // the title only under its original name.
         val itemOriginalTitle = _uiState.value.item?.originalTitle
+        val absoluteEpisodeNumber = _uiState.value.episodes.firstOrNull { candidate ->
+            candidate.tmdbSeasonNumber == season && candidate.tmdbEpisodeNumber == episode
+        }?.absoluteEpisodeNumber
 
         val vodSources = if (requestMediaType == MediaType.MOVIE) {
             streamRepository.resolveMovieVodSources(
@@ -3450,7 +3453,8 @@ class DetailsViewModel @Inject constructor(
                 tmdbId = currentMediaId,
                 tvdbId = _uiState.value.tvdbId,
                 timeoutMs = timeoutMs,
-                originalTitle = itemOriginalTitle
+                originalTitle = itemOriginalTitle,
+                absoluteEpisodeNumber = absoluteEpisodeNumber
             )
         }
         val validVodSources = vodSources.filter { !it.url.isNullOrBlank() }

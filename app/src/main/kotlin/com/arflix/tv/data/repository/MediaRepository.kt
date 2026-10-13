@@ -3628,6 +3628,7 @@ private fun TmdbEpisode.toEpisode(): Episode {
         id = id,
         episodeNumber = episodeNumber,
         seasonNumber = seasonNumber,
+        absoluteEpisodeNumber = absoluteEpisodeNumber,
         name = name,
         overview = overview ?: "",
         stillPath = stillPath?.let { "${Constants.IMAGE_BASE}$it" },
