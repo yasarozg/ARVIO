@@ -173,9 +173,9 @@ _tmp_tv_perf/
 /.playback-fixtures/
 graphify-out/
 skills-lock.json
-
 # sherpa-onnx speech recognition AAR (~50 MB), downloaded and verified by app/build.gradle.kts
 app/libs/sherpa-onnx-*.aar
 app/libs/sherpa-onnx-*.aar.part
 # Private, encrypted web SIMKL session storage for source/self-hosted installs.
 web/.data/
+local.properties
