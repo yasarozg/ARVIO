@@ -7162,6 +7162,15 @@ internal fun PlayerMetadataChrome(
     }
     val metaLine = buildPlaybackBaseMetaLine(uiState, mediaType, seasonNumber, episodeNumber)
     val selectedStream = uiState.selectedStream
+    // Use the exact name shown in Sources. IPTV/VOD providers often put the useful episode
+    // identity in this field rather than in the metadata title.
+    val selectedSourceName = sequenceOf(
+        selectedStream?.source,
+        selectedStream?.behaviorHints?.filename,
+        selectedStream?.addonTitle,
+        selectedStream?.rawLabel
+    ).mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+        .firstOrNull()
     val streamSizeLabel = selectedStream?.let { formatStreamSizeInGb(it) }
     val hasQualityBadges = selectedStream?.let { buildPlaybackBadges(it).isNotEmpty() } == true
     val overview = playerPauseOverview(
@@ -7170,9 +7179,9 @@ internal fun PlayerMetadataChrome(
     val logoHeight = 44.dp
     val logoWidth = 230.dp
     val chromeHeight = when {
-        isPaused && overview.isNotBlank() -> 138.dp
-        isPaused -> 104.dp
-        else -> 86.dp
+        isPaused && overview.isNotBlank() -> 158.dp
+        isPaused -> 124.dp
+        else -> 106.dp
     }
 
     Row(
@@ -7222,6 +7231,16 @@ internal fun PlayerMetadataChrome(
                         fontWeight = FontWeight.Bold
                     ),
                     color = TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            if (!selectedSourceName.isNullOrBlank()) {
+                Text(
+                    text = selectedSourceName,
+                    style = ArflixTypography.body.copy(fontSize = 13.sp),
+                    color = TextPrimary.copy(alpha = 0.82f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
