@@ -14,6 +14,7 @@ All notable changes to this project are documented in this file.
 - Web source/audio/subtitle fixes, Android-aligned default catalogs, Collection Studio, safe account migration/setup, partner links, website guides and improved Docker/Unraid preview packaging.
 - Contributors: [@silentbil](https://github.com/silentbil), [@test01203](https://github.com/test01203) (koby455) and [@Himanth-reddy](https://github.com/Himanth-reddy). AI author/co-author credits are retained in the full history.
 - Version 2.2, version code 319. [Release notes](releases/v2.2/RELEASE_NOTES.md), [merged contributions](releases/v2.2/MERGED_CONTRIBUTIONS.md), [complete commit history](releases/v2.2/COMMIT_CHANGELOG.md).
+- Fork adaptations retained: absolute IPTV VOD matching, category-based VPN rules, profile-scoped cloud sync with IPTV/EPG credential protection, configurable buffering, IPTV source filenames, fork updater coordinates, persistent signing and optional Discord SDK CI behavior.
 
 ## [2.0.1] - 2026-09-30
 

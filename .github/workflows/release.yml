@@ -70,12 +70,19 @@ jobs:
       - name: Derive Android version from release tag
         run: |
           version_name="${GITHUB_REF_NAME#v}"
+          # Accept the patch tag form (v2.2.0) and the public release form
+          # (v2.2), while keeping Android versionName stable at 2.2.
+          case "$version_name" in
+            *.0) version_name="${version_name%.0}" ;;
+          esac
           if [ -z "$version_name" ]; then
             echo "Could not derive versionName from tag $GITHUB_REF_NAME" >&2
             exit 1
           fi
           echo "ARVIO_VERSION_NAME=$version_name" >> "$GITHUB_ENV"
-          echo "ARVIO_VERSION_CODE=$((318000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          # 2.0.1 occupied the 318xxx range; 2.2 starts at 319xxx so every
+          # release APK remains installable as an in-place update.
+          echo "ARVIO_VERSION_CODE=$((319000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
 
       - name: Validate release signing secrets
         env:

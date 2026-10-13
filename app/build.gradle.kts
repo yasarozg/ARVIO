@@ -64,11 +64,11 @@ val updateGithubRepo = localBuildValue("GITHUB_REPO").ifBlank { "ARVIO" }
 val appVersionName = providers.gradleProperty("arvioVersionName").orNull
     ?.trim()
     ?.takeIf { it.isNotBlank() }
-    ?: "2.0.1"
+    ?: "2.2"
 val appVersionCode = providers.gradleProperty("arvioVersionCode").orNull
     ?.toIntOrNull()
     ?.takeIf { it > 0 }
-    ?: 318
+    ?: 319
 
 android {
     namespace = "com.arflix.tv"
