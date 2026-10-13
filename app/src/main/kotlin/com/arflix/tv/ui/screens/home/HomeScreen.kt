@@ -1066,7 +1066,23 @@ fun HomeScreen(
     // ── IPTV + service-collection hero player state ──
     val isHeroIptv = displayHeroItem != null && viewModel.isIptvItem(displayHeroItem)
     val iptvChannelsVersion by viewModel.iptvChannelsVersion.collectAsStateWithLifecycle()
+    // These are intentionally observed here: VPN rules and the active network may change while
+    // a Favorite TV card remains focused, and must immediately re-evaluate its preview.
+    val vpnRequiredGroups by viewModel.vpnRequiredGroups.collectAsStateWithLifecycle()
+    val previewNetworkConnected by viewModel.previewNetworkState.collectAsStateWithLifecycle()
     val isHeroCollection = displayHeroItem != null && viewModel.isCollectionItem(displayHeroItem)
+    val canPreviewHeroIptv = remember(
+        displayHeroItem?.id,
+        isHeroIptv,
+        iptvChannelsVersion,
+        vpnRequiredGroups,
+        previewNetworkConnected
+    ) {
+        displayHeroItem
+            ?.takeIf { isHeroIptv }
+            ?.let { viewModel.canPreviewIptvChannel(it.id) }
+            ?: false
+    }
     // Track service-collection "played once" — after the video ends we stop
     // re-spawning the player until the user focuses a *different* service.
     // Keyed on the focused collection id so re-entering the card after
@@ -1090,7 +1106,9 @@ fun HomeScreen(
         serviceHeroVideoUrl != null -> serviceHeroVideoUrl
         suppressHeroVideoPlayback -> null
         // Reading the version re-evaluates this once resolveIptvChannels() finds the channel.
-        isHeroIptv -> displayHeroItem?.takeIf { iptvChannelsVersion >= 0 }?.let { viewModel.getIptvStreamUrl(it.id) }
+        isHeroIptv -> displayHeroItem
+            ?.takeIf { iptvChannelsVersion >= 0 && canPreviewHeroIptv }
+            ?.let { viewModel.getIptvStreamUrl(it.id) }
         else -> null
     }
     // A focused channel card whose channel isn't known yet: look it up now rather than

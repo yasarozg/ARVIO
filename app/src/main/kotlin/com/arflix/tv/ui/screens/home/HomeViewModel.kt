@@ -22,10 +22,12 @@ import com.arflix.tv.data.model.CollectionGroupKind
 import com.arflix.tv.data.model.collectionRailKeyOrGroup
 import com.arflix.tv.data.model.MediaItem
 import com.arflix.tv.data.model.MediaType
+import com.arflix.tv.data.model.PlaylistGroupKey
 import com.arflix.tv.data.model.SportsAddonCapabilities
 import com.arflix.tv.R
 import com.arflix.tv.data.repository.MediaRepository
 import com.arflix.tv.network.OkHttpProvider
+import com.arflix.tv.network.NetworkMonitor
 import com.arflix.tv.network.TmdbPriorityDispatcher
 import com.arflix.tv.network.withIptvProviderRequestGuard
 import com.arflix.tv.network.TmdbPriorityDispatcher.Priority
@@ -44,6 +46,7 @@ import com.arflix.tv.data.repository.StreamRepository
 import com.arflix.tv.data.repository.IptvPlaybackTarget
 import com.arflix.tv.data.repository.IptvPlaybackUrlResolver
 import com.arflix.tv.data.repository.IptvRepository
+import com.arflix.tv.data.repository.StalkerPortalSupport
 import com.arflix.tv.data.repository.HomeServerRepository
 import com.arflix.tv.data.repository.CloudSyncStatus
 import com.arflix.tv.data.repository.CollectionTemplateManifest
@@ -383,6 +386,7 @@ class HomeViewModel @Inject constructor(
     private val apkDownloader: com.arflix.tv.updater.ApkDownloader,
     private val updatePreferences: com.arflix.tv.updater.UpdatePreferences,
     private val updateStatusManager: com.arflix.tv.updater.UpdateStatusManager,
+    private val networkMonitor: NetworkMonitor,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
     private val imageLoader: ImageLoader by lazy(LazyThreadSafetyMode.NONE) {
@@ -413,6 +417,11 @@ class HomeViewModel @Inject constructor(
     // Bumped when [resolveIptvChannels] adds channels, so the hero re-reads its stream URL.
     private val _iptvChannelsVersion = MutableStateFlow(0)
     val iptvChannelsVersion: StateFlow<Int> = _iptvChannelsVersion.asStateFlow()
+    private val _vpnRequiredGroups = MutableStateFlow<List<String>>(emptyList())
+    /** State observed by Home so a profile/cloud VPN-rule change re-evaluates its preview. */
+    val vpnRequiredGroups: StateFlow<List<String>> = _vpnRequiredGroups.asStateFlow()
+    /** A VPN connection changes Android's active network; Home rechecks the live status then. */
+    val previewNetworkState: StateFlow<Boolean> = networkMonitor.connectionState
     private val _sportsHomeRows = MutableStateFlow<List<Category>>(emptyList())
     val sportsHomeRows: StateFlow<List<Category>> = combine(
         _sportsHomeRows,
@@ -1009,6 +1018,18 @@ class HomeViewModel @Inject constructor(
 
     /** Get the stream URL for an IPTV MediaItem. */
     fun getIptvStreamUrl(itemId: Int): String? = iptvChannelMap[itemId]?.streamUrl
+
+    /**
+     * Home's silent live preview must obey the same VPN category rule as actual Live TV
+     * playback. Unlike Live TV, Home deliberately does not open a blocking dialog while the
+     * user is only moving focus across cards.
+     */
+    fun canPreviewIptvChannel(itemId: Int): Boolean {
+        val channel = iptvChannelMap[itemId] ?: return false
+        val sourceId = StalkerPortalSupport.playlistIdFromChannelId(channel.id)
+        val requiresVpn = PlaylistGroupKey.build(sourceId, channel.group) in _vpnRequiredGroups.value
+        return !requiresVpn || networkMonitor.isVpnActive
+    }
 
     // The same resolver and client limits as the Live TV screen, so a channel previews on Home
     // exactly when it plays there.
@@ -1939,6 +1960,12 @@ class HomeViewModel @Inject constructor(
     }
 
     init {
+        viewModelScope.launch {
+            iptvRepository.observeVpnRequiredGroups()
+                .distinctUntilChanged()
+                .collect { _vpnRequiredGroups.value = it }
+        }
+
         // Rows are published from many places (startup cache, catalog load, next pages, cloud
         // reloads), always with unmarked cards. Once a pass has run, new rows take over what it
         // found at once, so the ticks do not blink off while a catalog load lands; before that,
