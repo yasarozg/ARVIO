@@ -327,7 +327,7 @@ private fun tvGeneralRowsForSection(section: String): List<Int> {
             (if (BuildConfig.AUDIO_SYNC_AVAILABLE) listOf(48) else emptyList()) +
             listOf(39, 9, 45)
         "ai_subtitles" -> listOf(28, 29, 30, 31, 32, 33)
-        "playback" -> listOf(10, 11, 12, 43, 44, 13, 14, 34, 37, 16, 15, 40, 27)
+        "playback" -> listOf(10, 11, 12, 43, 44, 13, 14, 34, 37, 45, 16, 15, 40, 27)
         "appearance" -> listOf(17, 18, 20, 21, 24, 23, 22, 41, 46, 36, 47)
         "profiles" -> listOf(19)
         "network" -> listOf(25, 26, 35)
@@ -2066,6 +2066,7 @@ fun SettingsScreen(
                             clockFormat = uiState.clockFormat,
                             showBudget = uiState.showBudget,
                             volumeBoostDb = uiState.volumeBoostDb,
+                            bufferingLevel = uiState.bufferingLevel,
                             focusedIndex = if (activeZone == Zone.CONTENT) contentFocusIndex else -1,
                             onSubtitleClick = openSubtitlePicker,
                             onSecondarySubtitleClick = openSecondarySubtitlePicker,
@@ -2107,6 +2108,7 @@ fun SettingsScreen(
                             showLoadingStats = uiState.showLoadingStats,
                             onShowLoadingStatsToggle = { viewModel.setShowLoadingStats(it) },
                             onVolumeBoostClick = { viewModel.cycleVolumeBoost() },
+                            onBufferingLevelClick = { viewModel.cycleBufferingLevel() },
                             onSubtitleSizeClick = { viewModel.cycleSubtitleSize() },
                             onSubtitleColorClick = { viewModel.cycleSubtitleColor() },
                             onSubtitleOffsetClick = { viewModel.cycleSubtitleOffset() },
@@ -5744,6 +5746,14 @@ private fun MobileSettingsSubPage(
                         onClick = { viewModel.cycleTrailerDelay() }
                     )
                     MobileSettingsRow(
+                        icon = Icons.Default.Storage,
+                        title = stringResource(R.string.buffering_level),
+                        subtitle = stringResource(R.string.buffering_level_desc),
+                        value = uiState.bufferingLevel.name,
+                        isFocused = false,
+                        onClick = { viewModel.cycleBufferingLevel() }
+                    )
+                    MobileSettingsRow(
                         icon = Icons.Default.Settings,
                         title = stringResource(R.string.frame_rate),
                         value = uiState.frameRateMatchingMode,
@@ -7144,6 +7154,7 @@ private fun TvGeneralSettingsRows(
     spoilerBlurEnabled: Boolean = false,
     accentColor: String = "White",
     volumeBoostDb: Int = 0,
+    bufferingLevel: com.arflix.tv.ui.screens.player.BufferingLevel = com.arflix.tv.ui.screens.player.BufferingLevel.Default,
     focusedIndex: Int,
     onSubtitleClick: () -> Unit,
     onSecondarySubtitleClick: () -> Unit = {},
@@ -7170,6 +7181,7 @@ private fun TvGeneralSettingsRows(
     showLoadingStats: Boolean = true,
     onShowLoadingStatsToggle: (Boolean) -> Unit = {},
     onVolumeBoostClick: () -> Unit = {},
+    onBufferingLevelClick: () -> Unit = {},
     trailerAutoPlay: Boolean = false,
     trailerSoundEnabled: Boolean = false,
     onSubtitleSizeClick: () -> Unit = {},
@@ -7272,6 +7284,7 @@ private fun TvGeneralSettingsRows(
                 13 -> SettingsToggleRow(stringResource(R.string.trailer_auto_play), stringResource(R.string.trailer_desc), trailerAutoPlay, focusedIndex == localIndex, onTrailerAutoPlayToggle, Modifier.settingsFocusSlot(localIndex))
                 14 -> SettingsToggleRow(stringResource(R.string.trailer_sound), stringResource(R.string.trailer_sound_desc), trailerSoundEnabled, focusedIndex == localIndex, onTrailerSoundEnabledToggle, Modifier.settingsFocusSlot(localIndex))
                 15 -> SettingsRow(Icons.Default.Movie, stringResource(R.string.frame_rate), stringResource(R.string.frame_rate_desc), frameRateMatchingMode, focusedIndex == localIndex, onFrameRateMatchingClick, Modifier.settingsFocusSlot(localIndex))
+                45 -> SettingsRow(Icons.Default.Storage, stringResource(R.string.buffering_level), stringResource(R.string.buffering_level_desc), bufferingLevel.name, focusedIndex == localIndex, onBufferingLevelClick, Modifier.settingsFocusSlot(localIndex))
                 16 -> SettingsRow(Icons.Default.HighQuality, stringResource(R.string.quality_filters), stringResource(R.string.quality_filters_desc), qualityFilterValue, focusedIndex == localIndex, onQualityFiltersClick, Modifier.settingsFocusSlot(localIndex))
                 17 -> SettingsRow(Icons.Default.Widgets, stringResource(R.string.card_layout), stringResource(R.string.card_layout_desc), cardLayoutMode, focusedIndex == localIndex, onCardLayoutToggle, Modifier.settingsFocusSlot(localIndex))
                 18 -> SettingsRow(

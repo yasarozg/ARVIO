@@ -198,6 +198,7 @@ import com.arflix.tv.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -386,11 +387,15 @@ fun PlayerScreen(
         deviceType == com.arflix.tv.util.DeviceType.TV &&
             (isLowRamPlaybackDevice || playbackMemoryClassMb <= 384)
     }
-    val playbackBufferProfile = remember(isLowRamPlaybackDevice, playbackMemoryClassMb, deviceType) {
+    val bufferingLevel by context.settingsDataStore.data
+        .map { BufferingLevel.fromPreference(it[BUFFERING_LEVEL_KEY]) }
+        .collectAsState(initial = BufferingLevel.Default)
+    val playbackBufferProfile = remember(isLowRamPlaybackDevice, playbackMemoryClassMb, deviceType, bufferingLevel) {
         buildPlaybackBufferProfile(
             memoryClassMb = playbackMemoryClassMb,
             isLowRamDevice = isLowRamPlaybackDevice,
-            isTvDevice = deviceType == com.arflix.tv.util.DeviceType.TV
+            isTvDevice = deviceType == com.arflix.tv.util.DeviceType.TV,
+            bufferingLevel = bufferingLevel
         )
     }
     // No device-name decoder guessing — matches NuvioTV, which is hardware-first for video and
@@ -6717,7 +6722,8 @@ private data class PlaybackBufferProfile(
 private fun buildPlaybackBufferProfile(
     memoryClassMb: Int,
     isLowRamDevice: Boolean,
-    isTvDevice: Boolean
+    isTvDevice: Boolean,
+    bufferingLevel: BufferingLevel = BufferingLevel.Default
 ): PlaybackBufferProfile {
     val heapMb = memoryClassMb.coerceAtLeast(256)
     val targetMb = when {
@@ -6757,10 +6763,10 @@ private fun buildPlaybackBufferProfile(
     }
 
     return PlaybackBufferProfile(
-        minBufferMs = minBufferMs,
-        maxBufferMs = maxBufferMs,
-        bufferForPlaybackMs = startBufferMs,
-        bufferForPlaybackAfterRebufferMs = rebufferMs,
+        minBufferMs = bufferingLevel.minBufferMs ?: minBufferMs,
+        maxBufferMs = bufferingLevel.maxBufferMs ?: maxBufferMs,
+        bufferForPlaybackMs = bufferingLevel.bufferForPlaybackMs ?: startBufferMs,
+        bufferForPlaybackAfterRebufferMs = bufferingLevel.bufferForPlaybackAfterRebufferMs ?: rebufferMs,
         targetBufferBytes = targetMb * 1024 * 1024,
         backBufferMs = backBufferMs,
         prioritizeTimeOverSizeThresholds = !isLowRamDevice && heapMb > 768
