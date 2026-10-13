@@ -70,11 +70,11 @@ jobs:
       - name: Derive Android version from release tag
         run: |
           version_name="${GITHUB_REF_NAME#v}"
-          # Accept the patch tag form (v2.2.0) and the public release form
+          # Accept four-part patch tags (v2.2.0.0) and the public release form
           # (v2.2), while keeping Android versionName stable at 2.2.
-          case "$version_name" in
-            *.0) version_name="${version_name%.0}" ;;
-          esac
+          while [[ "$version_name" == *.0 ]]; do
+            version_name="${version_name%.0}"
+          done
           if [ -z "$version_name" ]; then
             echo "Could not derive versionName from tag $GITHUB_REF_NAME" >&2
             exit 1
