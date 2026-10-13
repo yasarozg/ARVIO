@@ -609,6 +609,7 @@ fun LiveTvScreen(
     }
     val hiddenGroupSet = remember(state.snapshot.hiddenGroups) { state.snapshot.hiddenGroups.toSet() }
     val lockedGroupSet = remember(state.lockedGroups) { state.lockedGroups.toSet() }
+    val vpnRequiredGroupSet = remember(state.vpnRequiredGroups) { state.vpnRequiredGroups.toSet() }
     var unlockedGroupKeys by remember { mutableStateOf(emptySet<String>()) }
     val restrictedGroupSet = remember(lockedGroupSet, unlockedGroupKeys) {
         lockedGroupSet - unlockedGroupKeys
@@ -2489,6 +2490,19 @@ fun LiveTvScreen(
         }
     }
 
+    var vpnBlockedChannelName by remember { mutableStateOf<String?>(null) }
+    var vpnPlaybackRetrySignal by remember { mutableIntStateOf(0) }
+
+    fun canStartLivePlayback(channel: EnrichedChannel): Boolean {
+        if (!viewModel.requiresVpnForLiveChannel(channel.source) || viewModel.isVpnActive()) {
+            // Also lets the user retry the same selected channel after connecting.
+            vpnPlaybackRetrySignal++
+            return true
+        }
+        vpnBlockedChannelName = channel.name
+        return false
+    }
+
     // Single source for the previous channel: every path that changes the
     // channel ends up writing playingChannelId, so observing it here keeps the
     // toggle correct no matter which one was used.
@@ -2504,6 +2518,7 @@ fun LiveTvScreen(
     // Tune straight to a channel without leaving fullscreen. Shared by zapping
     // and by the previous-channel jump so both leave the same state behind.
     fun tuneToDisplayChannel(channel: EnrichedChannel) {
+        if (!canStartLivePlayback(channel)) return
         noteGuideUserNavigation()
         playingChannelId = channel.id
         focusedChannelId = channel.id
@@ -2768,6 +2783,7 @@ fun LiveTvScreen(
     }
 
     fun playVariant(channel: EnrichedChannel) {
+        if (!canStartLivePlayback(channel)) return
         noteGuideUserNavigation()
         val displayId = displayChannelIdFor(channel.id, visibleEnrichedState.value.index.byId, variantGroups) ?: channel.id
         playingChannelId = channel.id
@@ -2782,6 +2798,7 @@ fun LiveTvScreen(
 
     fun playProgramInMini(channel: EnrichedChannel, program: IptvProgram?) {
         if (program?.catchupAvailable == false) return
+        if (!canStartLivePlayback(channel)) return
         noteGuideUserNavigation()
         val playbackChannel = if (program != null) {
             catchupPlaybackVariant(channel, visibleChannels)
@@ -2814,6 +2831,7 @@ fun LiveTvScreen(
     }
 
     fun playLiveFullscreen(channel: EnrichedChannel) {
+        if (!canStartLivePlayback(channel)) return
         invalidateProgramActionLookup()
         noteGuideUserNavigation()
         playingChannelId = channel.id
@@ -2891,6 +2909,7 @@ fun LiveTvScreen(
     }
 
     fun selectChannel(channel: EnrichedChannel) {
+        if (!canStartLivePlayback(channel)) return
         val sameChannel = isSamePlayingChannel(channel)
         when (
             channelRowInteractionAction(
@@ -2940,6 +2959,7 @@ fun LiveTvScreen(
     fun playProgramInFullscreen(program: IptvProgram?, targetChannel: EnrichedChannel? = null) {
         if (program?.catchupAvailable == false) return
         val channel = targetChannel ?: playingChannel
+        if (channel != null && !canStartLivePlayback(channel)) return
         if (program != playingCatchupProgram) {
             catchupPlaybackOffsetMs = 0L
         }
@@ -2968,6 +2988,7 @@ fun LiveTvScreen(
     var lastChannelDigitAt by remember { mutableStateOf(0L) }
 
     fun tuneChannelNumber(channel: EnrichedChannel) {
+        if (!canStartLivePlayback(channel)) return
         noteGuideUserNavigation()
         playingChannelId = channel.id
         focusedChannelId = channel.id
@@ -3424,7 +3445,7 @@ fun LiveTvScreen(
             }
         }
     }
-    LaunchedEffect(currentStreamUrl, playingCatchupProgram, catchupUrlAnchorOffsetMs, catchupReloadSignal, playingChannel?.id, playbackForeground, sportsHiddenPlayback) {
+    LaunchedEffect(currentStreamUrl, playingCatchupProgram, catchupUrlAnchorOffsetMs, catchupReloadSignal, vpnPlaybackRetrySignal, playingChannel?.id, playbackForeground, sportsHiddenPlayback) {
         if (!playbackForeground || sportsHiddenPlayback) return@LaunchedEffect
         val rawStream = currentStreamUrl ?: return@LaunchedEffect
         // A foreground resume re-prepares the retained source; do not probe/open it twice.
@@ -3438,6 +3459,11 @@ fun LiveTvScreen(
         lastPreparedStreamUrl = null
         playerIsBuffering = true
         val sourceChannel = playingChannel?.source
+        if (sourceChannel != null && viewModel.requiresVpnForLiveChannel(sourceChannel) && !viewModel.isVpnActive()) {
+            playerIsBuffering = false
+            vpnBlockedChannelName = playingChannel?.name ?: sourceChannel.name
+            return@LaunchedEffect
+        }
         val streamProgram = playingCatchupProgram?.shiftedForCatchup(catchupUrlAnchorOffsetMs)
         val target = runCatching {
             if (sourceChannel != null) {
@@ -4011,6 +4037,10 @@ fun LiveTvScreen(
                     onSelectGroup = { group ->
                         requestCategorySelection(group.id)
                     },
+                    vpnRequiredGroupKeys = vpnRequiredGroupSet,
+                    onToggleGroupVpn = { group ->
+                        viewModel.toggleVpnRequiredGroup(group.playlistId, group.playlistGroupName.orEmpty())
+                    },
                     onOpenSearch = { searchOpen = true },
                     providers = providerFilters,
                     selectedProviderId = selectedProviderId,
@@ -4226,6 +4256,8 @@ fun LiveTvScreen(
                     },
                     lockedGroupKeys = lockedGroupSet,
                     onToggleCategoryLock = ::requestCategoryLockToggle,
+                    vpnRequiredGroupKeys = vpnRequiredGroupSet,
+                    onToggleCategoryVpn = viewModel::toggleVpnRequiredGroup,
                     onFocusEnter = {
                         if (focusZone != LiveTvFocusZone.TOPBAR) {
                             focusZone = LiveTvFocusZone.CATEGORY_LIST
@@ -4726,6 +4758,7 @@ fun LiveTvScreen(
                         quickZapOpen = false
                     },
                     onChannelSelect = { channel ->
+                        if (!canStartLivePlayback(channel)) return@QuickZapOverlay
                         playingChannelId = channel.id
                         focusedChannelId = channel.id
                         epgPrefetchAnchorId = channel.id
@@ -4798,6 +4831,7 @@ fun LiveTvScreen(
                 onDismiss = { searchOpen = false },
                 onPick = { channel ->
                     retainedPlayingChannel = channel
+                    if (!canStartLivePlayback(channel)) return@SearchOverlay
                     selectedCategoryId = bestCategoryIdForChannel(channel, visibleEnrichedState.value.tree)
                     playingChannelId = channel.id
                     focusedChannelId = channel.id
@@ -4823,6 +4857,7 @@ fun LiveTvScreen(
                 currentChannel = sourcesChannel,
                 variants = sourcesVariants,
                 onPick = { variant ->
+                    if (!canStartLivePlayback(variant)) return@FullscreenSourcesOverlay
                     sourcesChannel = null
                     if (variant.id != playingChannelId) {
                         retainedPlayingChannel = variant
@@ -4965,6 +5000,34 @@ fun LiveTvScreen(
                             text = stringResource(R.string.epg_watch_live),
                             style = ArflixTypography.button,
                             color = Color.White,
+                        )
+                    }
+                },
+                containerColor = Color(0xFF1A1A1A),
+                tonalElevation = 8.dp,
+            )
+        }
+
+        vpnBlockedChannelName?.let { channelName ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { vpnBlockedChannelName = null },
+                title = {
+                    androidx.tv.material3.Text(
+                        text = stringResource(R.string.live_vpn_required_title),
+                        color = Color.White,
+                    )
+                },
+                text = {
+                    androidx.tv.material3.Text(
+                        text = stringResource(R.string.live_vpn_required_message, channelName),
+                        color = TextSecondary,
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = { vpnBlockedChannelName = null }) {
+                        androidx.tv.material3.Text(
+                            text = stringResource(R.string.live_vpn_required_dismiss),
+                            color = Pink,
                         )
                     }
                 },

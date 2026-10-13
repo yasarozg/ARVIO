@@ -23,6 +23,7 @@ import com.arflix.tv.data.repository.StalkerPortalSupport
 import com.arflix.tv.ui.screens.tv.live.epgChannelAllowsVodSearch
 import com.arflix.tv.ui.screens.tv.live.selectConfidentEpgVodMatch
 import com.arflix.tv.network.OkHttpProvider
+import com.arflix.tv.network.NetworkMonitor
 import com.arflix.tv.util.AppLogger
 import com.arflix.tv.util.IPTV_EPG_VOD_ACTIONS_ENABLED_KEY
 import com.arflix.tv.util.settingsDataStore
@@ -93,6 +94,7 @@ data class TvUiState(
     val iptvPreferencesLoaded: Boolean = false,
     val tvSessionLoaded: Boolean = false,
     val lockedGroups: List<String> = emptyList(),
+    val vpnRequiredGroups: List<String> = emptyList(),
     val favoritesOnly: Boolean = false,
     val query: String = "",
     val epgLoadingChannelIds: Set<String> = emptySet(),
@@ -112,6 +114,7 @@ private data class IptvGroupPreferences(
     val hiddenGroups: List<String>,
     val groupOrder: List<String>,
     val lockedGroups: List<String>,
+    val vpnRequiredGroups: List<String>,
 )
 
 @HiltViewModel
@@ -123,7 +126,22 @@ class TvViewModel @Inject constructor(
     private val sportsRepository: com.arflix.tv.data.repository.SportsRepository,
     val sportsAddons: com.arflix.tv.data.repository.SportsAddonRepository,
     private val profileManager: com.arflix.tv.data.repository.ProfileManager,
+    private val networkMonitor: NetworkMonitor,
 ) : ViewModel() {
+
+    /** A source id is the prefix of regular and Stalker channel ids alike. */
+    fun requiresVpnForLiveChannel(channel: IptvChannel): Boolean {
+        val sourceId = StalkerPortalSupport.playlistIdFromChannelId(channel.id)
+        return PlaylistGroupKey.build(sourceId, channel.group) in _uiState.value.vpnRequiredGroups
+    }
+
+    fun isVpnActive(): Boolean = networkMonitor.isVpnActive
+
+    fun toggleVpnRequiredGroup(playlistId: String?, groupName: String) {
+        val sourceId = playlistId?.trim().orEmpty()
+        if (sourceId.isBlank() || groupName.isBlank()) return
+        viewModelScope.launch { iptvRepository.toggleVpnRequiredGroup(sourceId, groupName) }
+    }
 
     suspend fun loadSportsGuideArtwork() = sportsRepository.loadGuideArtwork()
     suspend fun cachedSportsMetadata() = sportsRepository.cachedMetadata()
@@ -389,8 +407,9 @@ class TvViewModel @Inject constructor(
                     iptvRepository.observeHiddenGroups(),
                     iptvRepository.observeGroupOrder(),
                     iptvRepository.observeLockedGroups(),
-                ) { hiddenGroups, groupOrder, lockedGroups ->
-                    IptvGroupPreferences(hiddenGroups, groupOrder, lockedGroups)
+                    iptvRepository.observeVpnRequiredGroups(),
+                ) { hiddenGroups, groupOrder, lockedGroups, vpnRequiredGroups ->
+                    IptvGroupPreferences(hiddenGroups, groupOrder, lockedGroups, vpnRequiredGroups)
                 },
             ) { triple, groupPreferences ->
                 triple to groupPreferences
@@ -414,6 +433,7 @@ class TvViewModel @Inject constructor(
                         config = config,
                         snapshot = snapshot,
                         lockedGroups = groupPreferences.lockedGroups,
+                        vpnRequiredGroups = groupPreferences.vpnRequiredGroups,
                         iptvPreferencesLoaded = true,
                     )
                 )

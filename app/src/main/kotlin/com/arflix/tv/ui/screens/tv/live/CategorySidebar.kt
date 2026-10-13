@@ -128,6 +128,8 @@ fun CategorySidebar(
     onMoveCategoryDown: (String?, String) -> Unit = { _, _ -> },
     lockedGroupKeys: Set<String> = emptySet(),
     onToggleCategoryLock: (String?, String, Boolean) -> Unit = { _, _, _ -> },
+    vpnRequiredGroupKeys: Set<String> = emptySet(),
+    onToggleCategoryVpn: (String?, String) -> Unit = { _, _ -> },
     onFocusEnter: () -> Unit = {},
     onMoveRight: () -> Unit = {},
     onMoveUpFromSearch: () -> Unit = {},
@@ -181,6 +183,7 @@ fun CategorySidebar(
         val groupName = category.playlistGroupName ?: return
         val groupKey = category.playlistId?.let { PlaylistGroupKey.build(it, groupName) }
         val isLocked = groupKey != null && groupKey in lockedGroupKeys
+        val requiresVpn = groupKey != null && groupKey in vpnRequiredGroupKeys
         menuSelectArmed = false
         activeMenu = CategoryMenuState(
             id = if (hidden) "hidden:${category.id}" else category.id,
@@ -191,6 +194,7 @@ fun CategorySidebar(
             canUnhide = hidden,
             canLock = !hidden && !isLocked,
             canUnlock = isLocked,
+            requiresVpn = requiresVpn,
         )
     }
 
@@ -208,6 +212,7 @@ fun CategorySidebar(
             canUnhide = menu.canUnhide,
             canLock = menu.canLock,
             canUnlock = menu.canUnlock,
+            requiresVpn = menu.requiresVpn,
             onHide = {
                 hiddenCategoryPendingFocus = menu.id
                 activeMenu = null
@@ -236,6 +241,14 @@ fun CategorySidebar(
             onUnlock = {
                 activeMenu = null
                 onToggleCategoryLock(menu.playlistId, menu.groupName, true)
+            },
+            onEnableVpn = {
+                activeMenu = null
+                onToggleCategoryVpn(menu.playlistId, menu.groupName)
+            },
+            onDisableVpn = {
+                activeMenu = null
+                onToggleCategoryVpn(menu.playlistId, menu.groupName)
             },
         )
     }.orEmpty()
@@ -1274,6 +1287,7 @@ private fun buildCategoryMenuActions(
     canMove: Boolean,
     canLock: Boolean,
     canUnlock: Boolean,
+    requiresVpn: Boolean,
     onHide: () -> Unit,
     onUnhide: () -> Unit,
     onMoveUp: () -> Unit,
@@ -1281,6 +1295,8 @@ private fun buildCategoryMenuActions(
     onMoveDown: () -> Unit,
     onLock: () -> Unit,
     onUnlock: () -> Unit,
+    onEnableVpn: () -> Unit,
+    onDisableVpn: () -> Unit,
 ): List<CategoryMenuAction> = buildList {
     if (canMove) {
         add(CategoryMenuAction(R.string.live_menu_move_top, Icons.Filled.KeyboardArrowUp, onMoveToTop))
@@ -1299,6 +1315,11 @@ private fun buildCategoryMenuActions(
     if (canUnlock) {
         add(CategoryMenuAction(R.string.live_menu_unlock_category, Icons.Filled.LockOpen, onUnlock))
     }
+    add(CategoryMenuAction(
+        if (requiresVpn) R.string.live_menu_disable_vpn_requirement else R.string.live_menu_enable_vpn_requirement,
+        Icons.Filled.Public,
+        if (requiresVpn) onDisableVpn else onEnableVpn,
+    ))
 }
 
 private data class CategoryMenuAction(
@@ -1316,6 +1337,7 @@ private data class CategoryMenuState(
     val canUnhide: Boolean,
     val canLock: Boolean,
     val canUnlock: Boolean,
+    val requiresVpn: Boolean,
     val focusedIndex: Int = 0,
 )
 

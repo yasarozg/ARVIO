@@ -60,6 +60,17 @@ class NetworkMonitor @Inject constructor(
         get() = checkNetworkConnectivity()
 
     /**
+     * Whether the active default network is routed through a VPN.
+     *
+     * This uses Android's transport information instead of checking for a
+     * particular VPN app, so it works with Proton VPN and other providers.
+     */
+    val isVpnActive: Boolean
+        get() = connectivityManager
+            .getNetworkCapabilities(connectivityManager.activeNetwork)
+            ?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true
+
+    /**
      * Flow that emits when network connectivity changes.
      * Emits true when connected, false when disconnected.
      * Only emits distinct values (no duplicates).

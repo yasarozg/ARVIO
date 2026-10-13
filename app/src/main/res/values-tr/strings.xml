@@ -266,4 +266,9 @@
     <string name="settings_cloud_sync_scope_desc">Senkronizasyon işlemine dahil edilecek profiller</string>
     <string name="settings_cloud_sync_scope_active">Aktif profil</string>
     <string name="settings_cloud_sync_scope_all">Tüm profiller</string>
+    <string name="live_menu_enable_vpn_requirement">VPN zorunlu yap</string>
+    <string name="live_menu_disable_vpn_requirement">VPN zorunluluğunu kaldır</string>
+    <string name="live_vpn_required_title">VPN bağlantısı gerekli</string>
+    <string name="live_vpn_required_message">%1$s izlemek için VPN’e bağlanın.</string>
+    <string name="live_vpn_required_dismiss">Anladım</string>
 </resources>

@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.sp
 import androidx.media3.exoplayer.ExoPlayer
 import com.arflix.tv.R
 import com.arflix.tv.data.model.IptvNowNext
+import com.arflix.tv.data.model.PlaylistGroupKey
 import com.arflix.tv.ui.theme.ArflixTypography
 import com.arflix.tv.ui.theme.TextPrimary
 
@@ -106,6 +107,8 @@ fun LiveTvGroupHome(
     onOpenFavorites: () -> Unit,
     onOpenRecents: () -> Unit,
     onSelectGroup: (LiveCategory) -> Unit,
+    vpnRequiredGroupKeys: Set<String> = emptySet(),
+    onToggleGroupVpn: (LiveCategory) -> Unit = {},
     onOpenSearch: () -> Unit = {},
     providers: List<TvProviderFilter> = emptyList(),
     selectedProviderId: String = "all",
@@ -236,9 +239,13 @@ fun LiveTvGroupHome(
             items = groups,
             key = { group -> "group_plank_${group.id}" },
         ) { group ->
+            val groupKey = group.playlistId
+                ?.let { playlistId -> group.playlistGroupName?.let { PlaylistGroupKey.build(playlistId, it) } }
             GroupPlankTile(
                 category = group,
                 onClick = { onSelectGroup(group) },
+                requiresVpn = groupKey != null && groupKey in vpnRequiredGroupKeys,
+                onToggleVpn = { onToggleGroupVpn(group) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 12.dp, vertical = 4.dp),
@@ -611,11 +618,17 @@ private fun PlaylistSubwayTile(
 private fun GroupPlankTile(
     category: LiveCategory,
     onClick: () -> Unit,
+    requiresVpn: Boolean,
+    onToggleVpn: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val displayLabel = liveCategoryLabel(category.playlistGroupName ?: category.label)
     val channelsSubtitle = stringResource(R.string.live_channels_count, category.count)
     val plankDescription = "$displayLabel, $channelsSubtitle"
+    val vpnDescription = stringResource(
+        if (requiresVpn) R.string.live_menu_disable_vpn_requirement
+        else R.string.live_menu_enable_vpn_requirement,
+    )
 
     Row(
         modifier = modifier
@@ -680,6 +693,22 @@ private fun GroupPlankTile(
                 overflow = TextOverflow.Ellipsis,
             )
         }
+
+        Text(
+            text = "VPN",
+            color = if (requiresVpn) LiveColors.Bg else LiveColors.FgMute,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .height(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (requiresVpn) liveAccent() else LiveColors.PanelRaised)
+                .clickable(onClick = onToggleVpn)
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+                .semantics {
+                    contentDescription = vpnDescription
+                },
+        )
 
         // Chevron Right
         Icon(

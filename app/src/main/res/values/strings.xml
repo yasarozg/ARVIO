@@ -1895,5 +1895,10 @@
     <string name="settings_cloud_sync_scope_desc">Profiles included in the Sync operation</string>
     <string name="settings_cloud_sync_scope_active">Active profile</string>
     <string name="settings_cloud_sync_scope_all">All profiles</string>
+    <string name="live_menu_enable_vpn_requirement">Require VPN</string>
+    <string name="live_menu_disable_vpn_requirement">VPN not required</string>
+    <string name="live_vpn_required_title">VPN connection required</string>
+    <string name="live_vpn_required_message">Connect to a VPN to watch %1$s.</string>
+    <string name="live_vpn_required_dismiss">Got it</string>
 </resources>
 

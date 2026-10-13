@@ -1220,6 +1220,12 @@ class IptvRepository @Inject constructor(
             decodeLockedGroups(prefs)
         }
 
+    /** Playlist-scoped live TV groups that may only start while a VPN is active. */
+    fun observeVpnRequiredGroups(): Flow<List<String>> =
+        profileManager.activeProfileId.combine(context.settingsDataStore.data) { _, prefs ->
+            decodeVpnRequiredGroups(prefs)
+        }
+
     fun observeGroupOrder(): Flow<List<String>> =
         profileManager.activeProfileId.combine(context.settingsDataStore.data) { _, prefs ->
             decodeGroupOrder(prefs)
@@ -2277,6 +2283,7 @@ class IptvRepository @Inject constructor(
             prefs.remove(favoriteChannelsKey())
             prefs.remove(hiddenGroupsKey())
             prefs.remove(lockedGroupsKey())
+            prefs.remove(vpnRequiredGroupsKey())
             prefs.remove(groupOrderKey())
             prefs.remove(groupOrderSchemaKey())
             prefs.remove(tvSessionKey())
@@ -2478,6 +2485,19 @@ class IptvRepository @Inject constructor(
         invalidationBus.markDirty(CloudSyncScope.IPTV, profileManager.getProfileIdSync(), "toggle locked group")
     }
 
+    suspend fun toggleVpnRequiredGroup(playlistId: String, groupName: String) {
+        val trimmedGroup = groupName.trim()
+        val trimmedPlaylist = playlistId.trim()
+        if (trimmedPlaylist.isEmpty() || trimmedGroup.isEmpty()) return
+        val key = PlaylistGroupKey.build(trimmedPlaylist, trimmedGroup)
+        context.settingsDataStore.edit { prefs ->
+            val existing = decodeVpnRequiredGroups(prefs).toMutableList()
+            if (!existing.remove(key)) existing.add(key)
+            if (existing.isEmpty()) prefs.remove(vpnRequiredGroupsKey())
+            else prefs[vpnRequiredGroupsKey()] = gson.toJson(existing.distinct())
+        }
+    }
+
     /**
      * Show or hide all groups of a playlist in one operation. Used by the
      * "show all / hide all" bulk toggle in the categories screen. A group is
@@ -2523,6 +2543,11 @@ class IptvRepository @Inject constructor(
                 .filterNot { PlaylistGroupKey(it).playlistId == trimmedId }
             if (retainedLocked.isEmpty()) prefs.remove(lockedGroupsKey())
             else prefs[lockedGroupsKey()] = gson.toJson(retainedLocked)
+
+            val retainedVpnRequired = decodeVpnRequiredGroups(prefs)
+                .filterNot { PlaylistGroupKey(it).playlistId == trimmedId }
+            if (retainedVpnRequired.isEmpty()) prefs.remove(vpnRequiredGroupsKey())
+            else prefs[vpnRequiredGroupsKey()] = gson.toJson(retainedVpnRequired)
 
             val retainedOrder = decodeGroupOrder(prefs)
                 .filterNot { PlaylistGroupKey(it).playlistId == trimmedId }
@@ -4527,6 +4552,8 @@ class IptvRepository @Inject constructor(
     private fun lockedGroupsKey(): Preferences.Key<String> = profileManager.profileStringKey("iptv_locked_groups")
     private fun lockedGroupsKeyFor(profileId: String): Preferences.Key<String> =
         profileManager.profileStringKeyFor(profileId, "iptv_locked_groups")
+    private fun vpnRequiredGroupsKey(): Preferences.Key<String> =
+        profileManager.profileStringKey("iptv_vpn_required_groups")
     private fun groupOrderKey(): Preferences.Key<String> = profileManager.profileStringKey("iptv_group_order")
     private fun groupOrderKeyFor(profileId: String): Preferences.Key<String> =
         profileManager.profileStringKeyFor(profileId, "iptv_group_order")
@@ -4601,6 +4628,20 @@ class IptvRepository @Inject constructor(
                 list
             }
             StalkerPortalSupport.normalizePlaylistGroupKeys(scoped)
+        }.getOrDefault(emptyList())
+    }
+
+    private fun decodeVpnRequiredGroups(prefs: Preferences): List<String> {
+        val raw = prefs[vpnRequiredGroupsKey()].orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val type = TypeToken.getParameterized(List::class.java, String::class.java).type
+            StalkerPortalSupport.normalizePlaylistGroupKeys(
+                gson.fromJson<List<String>>(raw, type).orEmpty()
+                    .map { it.trim() }
+                    .filter { '|' in it }
+                    .distinct(),
+            )
         }.getOrDefault(emptyList())
     }
 
