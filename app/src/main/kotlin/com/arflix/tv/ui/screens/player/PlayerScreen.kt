@@ -5199,7 +5199,7 @@ private fun BufferingProgressBadge(
                     bufferSeconds,
                     progressPercent
                 ),
-                style = ArflixTypography.caption,
+                style = ArflixTypography.caption.copy(fontSize = 11.sp),
                 color = Color.White
             )
         }

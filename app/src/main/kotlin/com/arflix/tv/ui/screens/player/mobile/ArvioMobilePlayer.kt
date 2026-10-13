@@ -541,10 +541,22 @@ fun ArvioMobilePlayer(
 
     // Title Block Text
     val eyebrowText = if (uiState.episodeTitle.isNullOrBlank()) "" else uiState.title
+    // `source` is the exact title presented in the Sources drawer (for example,
+    // "Kizilcik Serbeti S01E139"). Put it before the episode title so it remains
+    // visible in the single-line, ellipsized mobile control chrome.
+    val selectedSourceName = sequenceOf(
+        uiState.selectedStream?.source,
+        uiState.selectedStream?.behaviorHints?.filename,
+        uiState.selectedStream?.addonTitle,
+        uiState.selectedStream?.rawLabel
+    ).mapNotNull { it?.trim()?.takeIf { value -> value.isNotBlank() } }
+        .firstOrNull()
     val mainTitleText = if (!uiState.episodeTitle.isNullOrBlank()) {
-        "S${uiState.seasonNumber ?: 1} · E${uiState.episodeNumber ?: 1} — ${uiState.episodeTitle}"
+        "S${uiState.seasonNumber ?: 1} · E${uiState.episodeNumber ?: 1}" +
+            selectedSourceName?.let { " ($it)" }.orEmpty() +
+            " — ${uiState.episodeTitle}"
     } else {
-        uiState.title.ifBlank { "ARVIO Player" }
+        selectedSourceName ?: uiState.title.ifBlank { "ARVIO Player" }
     }
 
     val currentAudioTrackName = audioTracks.getOrNull(selectedAudioIndex)?.let {
