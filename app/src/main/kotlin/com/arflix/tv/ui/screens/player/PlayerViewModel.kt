@@ -18,6 +18,7 @@ import com.arflix.tv.data.model.MediaType
 import com.arflix.tv.data.model.RecentPlayedSource
 import com.arflix.tv.data.model.findRecentSourceMatch
 import com.arflix.tv.data.model.EpisodeIdentity
+import com.arflix.tv.data.model.absoluteEpisodeNumberForVod
 import com.arflix.tv.data.model.SportsAddonCapabilities
 import com.arflix.tv.data.model.IptvVodSourceIds
 import com.arflix.tv.data.model.isDirectStreamUrl
@@ -8268,6 +8269,14 @@ class PlayerViewModel @Inject constructor(
         // Passed alongside the displayed title: a provider catalogue may list
         // the title only under its original name.
         val lookupOriginalTitle = mediaRepository.getCachedItem(mediaType, currentMediaId)?.originalTitle
+        val absoluteEpisodeNumber = if (mediaType == MediaType.TV && seasonNumber != null && episodeNumber != null) {
+            mediaRepository.peekCachedSeasonEpisodes(currentMediaId, seasonNumber)
+                ?.firstOrNull { it.episodeNumber == episodeNumber }
+                ?.absoluteEpisodeNumberForVod()
+                ?: mediaRepository.getAbsoluteEpisodeNumber(currentMediaId, seasonNumber, episodeNumber)
+        } else {
+            null
+        }
 
         val vodSources = if (mediaType == MediaType.MOVIE) {
             streamRepository.resolveMovieVodSources(
@@ -8287,7 +8296,8 @@ class PlayerViewModel @Inject constructor(
                 tmdbId = currentMediaId,
                 tvdbId = currentTvdbId,
                 timeoutMs = timeoutMs,
-                originalTitle = lookupOriginalTitle
+                originalTitle = lookupOriginalTitle,
+                absoluteEpisodeNumber = absoluteEpisodeNumber
             )
         }
 

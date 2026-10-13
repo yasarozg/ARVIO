@@ -161,6 +161,7 @@ class MediaRepository @Inject constructor(
         synchronized(seasonEpisodesCache) { seasonEpisodesCache.clear() }
         collectionRefsCache.clear()
         tmdbCatalogRefsCache.clear()
+        tvSeasonEpisodeCounts.clear()
     }
 
     private data class MediaCacheEntry(val item: MediaItem, val timestamp: Long, val complete: Boolean)
@@ -172,6 +173,7 @@ class MediaRepository @Inject constructor(
     private val reviewsCache = mutableMapOf<String, CacheEntry<List<Review>>>()
     private val watchProvidersCache = mutableMapOf<String, CacheEntry<StreamingServicesResult?>>()
     private val seasonEpisodesCache = mutableMapOf<String, CacheEntry<List<Episode>>>()
+    private val tvSeasonEpisodeCounts = ConcurrentHashMap<Int, Map<Int, Int>>()
     private val imdbRatingCache = ConcurrentHashMap<String, CacheEntry<String>>()
     private val imdbEpisodeRatingsCache = ConcurrentHashMap<String, CacheEntry<Map<Pair<Int, Int>, String>>>()
     private val imdbRatingsByIdCache = ConcurrentHashMap<String, CacheEntry<String>>()
@@ -2384,6 +2386,9 @@ class MediaRepository @Inject constructor(
             val externalIdsDeferred = async { resolveExternalIds(MediaType.TV, tvId) }
 
             val details = detailsDeferred.await()
+            tvSeasonEpisodeCounts[tvId] = details.seasons
+                .filter { it.seasonNumber > 0 && it.episodeCount > 0 }
+                .associate { it.seasonNumber to it.episodeCount }
             val imdbId = externalIdsDeferred.await()?.imdbId?.also { cacheImdbId(MediaType.TV, tvId, it) }
             val imdbRating = imdbId?.let { getImdbRating(MediaType.TV, tvId, it) }
             details.toMediaItem().copy(
@@ -2395,9 +2400,16 @@ class MediaRepository @Inject constructor(
         return item
     }
 
-    /**
-     * Lightweight calls for LauncherContinueWatchingRepository to avoid heavy IMDb rating/caching tasks.
-     */
+    /** Calculates the provider-style absolute episode number from TMDB season sizes. */
+    fun getAbsoluteEpisodeNumber(tvId: Int, seasonNumber: Int, episodeNumber: Int): Int? {
+        if (seasonNumber <= 0 || episodeNumber <= 0) return null
+        if (seasonNumber == 1) return episodeNumber
+        val counts = tvSeasonEpisodeCounts[tvId] ?: return null
+        val priorSeasons = 1 until seasonNumber
+        if (priorSeasons.any { counts[it] == null }) return null
+        return priorSeasons.sumOf { counts.getValue(it) } + episodeNumber
+    }
+    /** Lightweight title calls used by LauncherContinueWatchingRepository. */
     suspend fun getLightweightMovieTitle(movieId: Int, language: String = contentLanguage): String? {
         return runCatching {
             tmdbApi.getMovieDetails(movieId, apiKey, language = language).title
