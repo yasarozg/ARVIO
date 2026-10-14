@@ -105,6 +105,10 @@ class WatchlistHomeLibraryDeviceTest {
             every { watchlistItems } returns MutableStateFlow(emptyList())
         }
         coEvery { watchlist.getLocalWatchlistItems() } returns emptyList()
+        coEvery { watchlist.getRemoteSyncStatus() } returns null
+        coEvery { watchlist.recordRemoteSyncStatus(any(), any(), any(), any()) } answers {
+            WatchlistRemoteSyncStatus(firstArg(), System.currentTimeMillis())
+        }
         val cloud = mockk<CloudSyncRepository>(relaxed = true)
         coEvery { cloud.pullFromCloud() } coAnswers { awaitCancellation() }
         val trakt = mockk<TraktRepository>(relaxed = true) {
@@ -112,6 +116,7 @@ class WatchlistHomeLibraryDeviceTest {
         }
         val remote = mockk<RemoteSyncManager>(relaxed = true)
         coEvery { remote.isRemoteConnected(any()) } returns false
+        coEvery { remote.getWatchlist() } returns null
         val media = mockk<MediaRepository>(relaxed = true)
         coEvery { media.loadHomeServerLibraryPage(any(), any(), any(), any(), any(), any()) } coAnswers {
             awaitCancellation()

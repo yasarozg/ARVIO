@@ -57,6 +57,10 @@ class WatchlistHomeLibraryTest {
         coEvery { cloud.pullFromCloud() } coAnswers { awaitCancellation() }
         every { watchlist.watchlistItems } returns MutableStateFlow(emptyList())
         coEvery { watchlist.getLocalWatchlistItems() } returns emptyList()
+        coEvery { watchlist.getRemoteSyncStatus() } returns null
+        coEvery { watchlist.recordRemoteSyncStatus(any(), any(), any(), any()) } answers {
+            WatchlistRemoteSyncStatus(firstArg(), System.currentTimeMillis())
+        }
         coEvery { history.getWatchHistory() } returns emptyList()
         coEvery { media.getLogoUrl(any<MediaItem>()) } returns null
         coEvery { media.loadHomeServerLibraryPage(any(), any(), any(), any(), any(), any()) } coAnswers {
@@ -73,6 +77,7 @@ class WatchlistHomeLibraryTest {
         coEvery { simkl.isConnected() } returns false
         val remote = mockk<RemoteSyncManager>(relaxed = true)
         coEvery { remote.isRemoteConnected(any()) } returns false
+        coEvery { remote.getWatchlist() } returns null
         model = WatchlistViewModel(mockk<Context>(relaxed = true), watchlist, cloud, trakt,
             remote, media, homes, catalogs, history, simkl, mockk(relaxed = true), profiles)
         store.put("library", model)

@@ -27,6 +27,8 @@ import com.arflix.tv.data.repository.TraktRepository
 import com.arflix.tv.data.repository.WatchHistoryEntry
 import com.arflix.tv.data.repository.WatchHistoryRepository
 import com.arflix.tv.data.repository.WatchlistRepository
+import com.arflix.tv.data.repository.WatchlistRemoteSyncOutcome
+import com.arflix.tv.data.repository.WatchlistRemoteSyncStatus
 import com.arflix.tv.data.repository.simkl.SimklAuthManager
 import com.arflix.tv.data.repository.simkl.SimklSyncService
 import com.arflix.tv.util.AppLogger
@@ -131,7 +133,8 @@ data class WatchlistUiState(
     val lastFocusedSectionIndex: Int = 0,
     val lastFocusedItemIndex: Int = 0,
     val hasMore: Boolean = false,
-    val isLoadingMore: Boolean = false
+    val isLoadingMore: Boolean = false,
+    val remoteSyncStatus: WatchlistRemoteSyncStatus? = null
 ) {
     val isEmpty: Boolean get() = movies.isEmpty() && series.isEmpty()
     val allItems: List<MediaItem> get() = movies + series
@@ -1011,6 +1014,9 @@ class WatchlistViewModel @Inject constructor(
 
     private fun loadWatchlistInstant() {
         sourceLoadJob = viewModelScope.launch {
+            watchlistRepository.getRemoteSyncStatus()?.let { status ->
+                _uiState.value = _uiState.value.copy(remoteSyncStatus = status)
+            }
             val initialLocalItems = watchlistRepository.getLocalWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
             if (initialLocalItems.isNotEmpty()) {
                 sourceItemsCache[WatchlistSourceItem.MyWatchlist.id] = initialLocalItems
@@ -1050,23 +1056,6 @@ class WatchlistViewModel @Inject constructor(
                 }
             }
 
-            val remoteConnected = try { remoteSyncManager.isRemoteConnected() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; false }
-            if (!remoteConnected) {
-                val items = watchlistRepository.getLocalWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
-                sourceItemsCache[WatchlistSourceItem.MyWatchlist.id] = items
-                if (_uiState.value.selectedSourceId == WatchlistSourceItem.MyWatchlist.id) {
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        movies = items.filter { it.mediaType == MOVIE },
-                        series = items.filter { it.mediaType == TV }
-                    )
-                    if (items.isNotEmpty()) fetchLogos(items)
-                    if (items.isNotEmpty()) enrichLocalWatchlistInBackground()
-                }
-                initialLoadComplete = true
-                return@launch
-            }
-
             val visibleItems = watchlistRepository.getLocalWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
             sourceItemsCache[WatchlistSourceItem.MyWatchlist.id] = visibleItems
             if (_uiState.value.selectedSourceId == WatchlistSourceItem.MyWatchlist.id) {
@@ -1080,9 +1069,7 @@ class WatchlistViewModel @Inject constructor(
             }
             initialLoadComplete = true
 
-            val syncedFromTrakt = withTimeoutOrNull(12_000) {
-                syncTraktWatchlistSuspend()
-            } ?: false
+            val syncedFromTrakt = syncRemoteWatchlistWithTimeout(12_000)
 
             if (!syncedFromTrakt) {
                 val fallbackItems = watchlistRepository.getLocalWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
@@ -1097,6 +1084,10 @@ class WatchlistViewModel @Inject constructor(
                         fetchLogos(fallbackItems)
                         enrichLocalWatchlistInBackground()
                     }
+                } else if (_uiState.value.remoteSyncStatus?.outcome == WatchlistRemoteSyncOutcome.NOT_CONFIGURED) {
+                    // A local-only profile with an empty list is a valid state,
+                    // not a failed Trakt request.
+                    _uiState.value = _uiState.value.copy(isLoading = false)
                 } else if (_uiState.value.selectedSourceId == WatchlistSourceItem.MyWatchlist.id) {
                     _uiState.value = _uiState.value.copy(
                         isLoading = false,
@@ -1163,13 +1154,8 @@ class WatchlistViewModel @Inject constructor(
             val hadItems = _uiState.value.allItems.isNotEmpty()
             _uiState.value = _uiState.value.copy(isLoading = !hadItems)
             try {
-                val remoteConnected = try { remoteSyncManager.isRemoteConnected() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; false }
-                val syncedFromTrakt = if (remoteConnected) {
-                    withTimeoutOrNull(15_000) { syncTraktWatchlistSuspend() } ?: false
-                } else {
-                    false
-                }
-                if (!syncedFromTrakt && !remoteConnected) {
+                val syncedFromTrakt = syncRemoteWatchlistWithTimeout(15_000)
+                if (!syncedFromTrakt && _uiState.value.remoteSyncStatus?.outcome == WatchlistRemoteSyncOutcome.NOT_CONFIGURED) {
                     val items = watchlistRepository.refreshWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
                     sourceItemsCache[WatchlistSourceItem.MyWatchlist.id] = items
                     _uiState.value = _uiState.value.copy(
@@ -1203,9 +1189,8 @@ class WatchlistViewModel @Inject constructor(
             loadActiveSourceItems(forceRefresh = true)
         } else {
             viewModelScope.launch {
-                val remoteConnected = try { remoteSyncManager.isRemoteConnected() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; false }
-                if (!remoteConnected || traktSyncInFlight) return@launch
-                val syncedFromTrakt = withTimeoutOrNull(10_000) { syncTraktWatchlistSuspend() } ?: false
+                if (traktSyncInFlight || _uiState.value.remoteSyncStatus?.outcome == WatchlistRemoteSyncOutcome.NOT_CONFIGURED) return@launch
+                val syncedFromTrakt = syncRemoteWatchlistWithTimeout(10_000)
                 if (!syncedFromTrakt && _uiState.value.isLoading) {
                     val fallbackItems = watchlistRepository.getLocalWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
                     _uiState.value = _uiState.value.copy(
@@ -1292,7 +1277,23 @@ class WatchlistViewModel @Inject constructor(
         return try {
             val syncResult = remoteSyncManager.getWatchlist()
             if (profileManager.getProfileIdSync() != requestedProfileId) return false
-            if (syncResult == null || !syncResult.connected) {
+            if (syncResult == null) {
+                updateRemoteSyncStatus(
+                    WatchlistRemoteSyncOutcome.NOT_CONFIGURED,
+                    detail = "No connected watchlist source"
+                )
+                false
+            } else if (syncResult.failed) {
+                updateRemoteSyncStatus(
+                    WatchlistRemoteSyncOutcome.REQUEST_FAILED,
+                    detail = "Every remote watchlist request failed"
+                )
+                false
+            } else if (!syncResult.connected) {
+                updateRemoteSyncStatus(
+                    WatchlistRemoteSyncOutcome.AUTH_REQUIRED,
+                    detail = "Remote source could not authenticate or respond"
+                )
                 false
             } else {
                 val traktItems = syncResult.items.orEmpty()
@@ -1312,6 +1313,12 @@ class WatchlistViewModel @Inject constructor(
                         fetchLogos(mergedItems)
                     }
                     runCatching { cloudSyncRepository.pushToCloud() }
+                    updateRemoteSyncStatus(
+                        outcome = if (rawCount > traktItems.size) WatchlistRemoteSyncOutcome.PARTIAL else WatchlistRemoteSyncOutcome.SUCCESS,
+                        rawCount = rawCount,
+                        mappedCount = traktItems.size,
+                        detail = if (rawCount > traktItems.size) "Some remote titles were unmatched or duplicated" else null
+                    )
                 } else if (rawCount == 0) {
                     val cachedItems = (watchlistRepository.getCachedItems().ifEmpty {
                         watchlistRepository.getWatchlistItems()
@@ -1327,6 +1334,12 @@ class WatchlistViewModel @Inject constructor(
                             fetchLogos(cachedItems)
                         }
                     }
+                    updateRemoteSyncStatus(
+                        WatchlistRemoteSyncOutcome.EMPTY,
+                        rawCount = 0,
+                        mappedCount = 0,
+                        detail = "Remote watchlist is empty"
+                    )
                 } else {
                     val cachedItems = watchlistRepository.getWatchlistItems().watchlistDisplayOrder().enrichWithPlaybackProgress()
                     sourceItemsCache[WatchlistSourceItem.MyWatchlist.id] = cachedItems
@@ -1338,6 +1351,12 @@ class WatchlistViewModel @Inject constructor(
                         )
                         fetchLogos(cachedItems)
                     }
+                    updateRemoteSyncStatus(
+                        WatchlistRemoteSyncOutcome.PARTIAL,
+                        rawCount = rawCount,
+                        mappedCount = 0,
+                        detail = "Remote titles could not be matched"
+                    )
                 }
                 true
             }
@@ -1347,9 +1366,39 @@ class WatchlistViewModel @Inject constructor(
                 throwable = error,
                 context = watchlistDiagnosticContext("trakt_sync")
             )
+            updateRemoteSyncStatus(
+                WatchlistRemoteSyncOutcome.REQUEST_FAILED,
+                detail = error::class.java.simpleName
+            )
             false
         } finally {
             traktSyncInFlight = false
+        }
+    }
+
+    private suspend fun syncRemoteWatchlistWithTimeout(timeoutMs: Long): Boolean {
+        val synced = withTimeoutOrNull(timeoutMs) { syncTraktWatchlistSuspend() }
+        if (synced == null) {
+            updateRemoteSyncStatus(
+                WatchlistRemoteSyncOutcome.TIMED_OUT,
+                detail = "Remote request exceeded ${timeoutMs / 1_000}s"
+            )
+        }
+        return synced ?: false
+    }
+
+    private suspend fun updateRemoteSyncStatus(
+        outcome: WatchlistRemoteSyncOutcome,
+        rawCount: Int? = null,
+        mappedCount: Int? = null,
+        detail: String? = null
+    ) {
+        try {
+            val status = watchlistRepository.recordRemoteSyncStatus(outcome, rawCount, mappedCount, detail)
+            _uiState.value = _uiState.value.copy(remoteSyncStatus = status)
+        } catch (error: Exception) {
+            if (error is kotlinx.coroutines.CancellationException) throw error
+            AppLogger.recordException(error, watchlistDiagnosticContext("record_remote_sync_status"))
         }
     }
 

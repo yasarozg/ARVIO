@@ -54,7 +54,9 @@ import com.arflix.tv.ui.skin.resolveAccentColor
 import com.arflix.tv.util.LocalDeviceType
 import com.arflix.tv.util.tr
 import com.arflix.tv.ui.screens.watchlist.calendar.*
+import java.text.DateFormat
 import java.time.LocalDate
+import java.util.Date
 
 internal enum class LibrarySection(val label: String) { WATCHLISTS("Watchlists"), LISTS("My lists"), SERVERS("Homeserver"), CALENDAR("Calendar") }
 internal val LibraryTabsTopInset = AppTopBarHeight - 8.dp
@@ -104,6 +106,7 @@ fun WatchlistScreen(
     var filters by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf(false) }
     var sourcesOpen by remember { mutableStateOf(false) }
+    var syncStatusOpen by remember { mutableStateOf(false) }
     var topFocused by remember { mutableStateOf(false) }
     var topIndex by remember { mutableIntStateOf(if (currentProfile != null) 3 else 2) }
     val firstTab = remember { FocusRequester() }
@@ -113,6 +116,8 @@ fun WatchlistScreen(
     val scopeSources = remember(state.sources, servers.libraries, section) { if(section == LibrarySection.SERVERS) servers.libraries.map { WatchlistSourceItem.HomeServer(it) } else librarySources(state.sources, section) }
     val collections = section == LibrarySection.LISTS && openedList == null
     val serverMode = section == LibrarySection.SERVERS
+    val isMyWatchlist = !serverMode && state.selectedSourceId == WatchlistSourceItem.MyWatchlist.id
+    val canShowWatchlistSync = !calendarMode && !collections && isMyWatchlist
     val selectedId = if (serverMode) "server_${servers.selectedSourceRef}" else state.selectedSourceId
     val savedItems = remember(state.movies, state.series, state.selectedSourceId) {
         val combined = state.movies + state.series
@@ -145,7 +150,7 @@ fun WatchlistScreen(
             servers.libraries.firstOrNull()?.let { viewModel.selectLibraryProvider(it.serverKind); viewModel.selectLibrary(it.sourceRef) }
         }
     }
-    BackHandler(!search && !filters && !sourcesOpen) {
+    BackHandler(!search && !filters && !sourcesOpen && !syncStatusOpen) {
         when { openedList != null -> openedList = null; !touch && !topFocused -> topFocus.requestFocus(); else -> onBack() }
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -221,9 +226,10 @@ fun WatchlistScreen(
                     Spacer(Modifier.weight(1f))
                     val serverTotal = servers.totalCount.takeIf { serverMode && mediaFilter == null }
                     Text(if(collections) "${scopeSources.size} ${tr("lists")}" else "${serverTotal ?: items.size}${if(serverTotal == null && hasMore) "+" else ""} ${tr("titles")}", color = Color.LightGray, fontSize = 13.sp)
-                    OledControl("⌕", onClick = { sourcesOpen = false; filters = false; search = true })
+                    OledControl("⌕", onClick = { sourcesOpen = false; filters = false; syncStatusOpen = false; search = true })
                     if(collections) OledControl("+ " + tr("New list"), onClick = { onNavigateToSettings("catalogs") })
-                    OledControl(tr("Filters"), modifier = Modifier.focusRequester(filterButton), onClick = { sourcesOpen = false; filters = true })
+                    if (canShowWatchlistSync) OledControl(tr("Sync"), onClick = { sourcesOpen = false; filters = false; syncStatusOpen = true })
+                    OledControl(tr("Filters"), modifier = Modifier.focusRequester(filterButton), onClick = { sourcesOpen = false; syncStatusOpen = false; filters = true })
                 }
             }
             if (calendarMode) {
@@ -240,8 +246,9 @@ fun WatchlistScreen(
                 if (!collections) OledControl(scopeSources.firstOrNull { it.id == selectedId }?.title ?: tr("Choose library"),
                     modifier = Modifier.weight(1f).testTag("library-source-picker"), onClick = { sourcesOpen = true })
                 else OledControl("+ " + tr("New list"), modifier = Modifier.weight(1f), onClick = { onNavigateToSettings("catalogs") })
-                OledControl("⌕", onClick = { sourcesOpen = false; filters = false; search = true })
-                OledControl(tr("Filters"), modifier = Modifier.focusRequester(filterButton), onClick = { sourcesOpen = false; filters = true })
+                OledControl("⌕", onClick = { sourcesOpen = false; filters = false; syncStatusOpen = false; search = true })
+                if (canShowWatchlistSync) OledControl(tr("Sync"), onClick = { sourcesOpen = false; filters = false; syncStatusOpen = true })
+                OledControl(tr("Filters"), modifier = Modifier.focusRequester(filterButton), onClick = { sourcesOpen = false; syncStatusOpen = false; filters = true })
             }
             if (openedList != null) Row(Modifier.padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                 OledControl("‹ ${tr("My lists")}", onClick = { openedList = null })
@@ -308,6 +315,22 @@ fun WatchlistScreen(
     if(sourcesOpen) OledDrawer(tr("Sources"), { sourcesOpen = false }) {
         OledSources(scopeSources, selectedId, Modifier.fillMaxWidth().heightIn(max = 500.dp), ::selectSource, onNavigateToSettings)
     }
+    if(syncStatusOpen) OledDrawer(tr("Watchlist sync"), { syncStatusOpen = false }) {
+        Text(
+            watchlistSyncStatusLabel(state.remoteSyncStatus),
+            color = if (state.remoteSyncStatus?.outcome in setOf(
+                    WatchlistRemoteSyncOutcome.SUCCESS,
+                    WatchlistRemoteSyncOutcome.EMPTY
+                )) Color.LightGray else MaterialTheme.colorScheme.error,
+            fontSize = 14.sp,
+            modifier = Modifier.padding(vertical = 12.dp).testTag("watchlist-sync-status")
+        )
+        OledControl(
+            if (state.isLoading) tr("Refreshing") else tr("Refresh now"),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = viewModel::refresh
+        )
+    }
     if(filters) OledDrawer(tr("Filters"), { filters = false; if(!touch) filterButton.requestFocus() }) {
         Text(tr("Sort"), color = Color.LightGray, modifier = Modifier.padding(vertical = 12.dp))
         listOf("Recently added" to HomeServerLibrarySort.RECENTLY_ADDED, "Title A-Z" to HomeServerLibrarySort.TITLE,
@@ -320,11 +343,36 @@ fun WatchlistScreen(
             listOf("All" to null, "Movies" to MediaType.MOVIE, "Series" to MediaType.TV).forEach { (label, value) ->
                 OledControl(tr(label), selected = mediaFilter == value, modifier = Modifier.fillMaxWidth(), onClick = { mediaFilter = value })
             }
-            OledControl(tr("Refresh"), onClick = { if(serverMode) viewModel.refreshLibrary() else viewModel.refresh() })
+            if (!isMyWatchlist) OledControl(tr("Refresh"), onClick = { if(serverMode) viewModel.refreshLibrary() else viewModel.refresh() })
         }
     }
     TextInputModal(search, tr("Search library"), initialValue = query,
         onConfirm = { query = it.trim(); search = false }, onCancel = { search = false })
+}
+
+internal fun watchlistSyncStatusLabel(status: WatchlistRemoteSyncStatus?): String {
+    if (status == null) return "No remote sync attempt on this device yet"
+    val attemptedAt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(status.attemptedAtMs))
+    val lastSuccessfulAt = status.lastSuccessfulAtMs?.let {
+        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+    }
+    val counts = if (status.rawCount != null && status.mappedCount != null) {
+        " · remote ${status.rawCount}, shown ${status.mappedCount}"
+    } else {
+        ""
+    }
+    val outcome = when (status.outcome) {
+        WatchlistRemoteSyncOutcome.SUCCESS -> "Synced"
+        WatchlistRemoteSyncOutcome.EMPTY -> "Remote list is empty"
+        WatchlistRemoteSyncOutcome.PARTIAL -> "Partial sync"
+        WatchlistRemoteSyncOutcome.NOT_CONFIGURED -> "No remote watchlist source"
+        WatchlistRemoteSyncOutcome.AUTH_REQUIRED -> "Remote sign-in or connection failed"
+        WatchlistRemoteSyncOutcome.REQUEST_FAILED -> "Remote request failed"
+        WatchlistRemoteSyncOutcome.TIMED_OUT -> "Remote request timed out"
+    }
+    val lastSuccess = lastSuccessfulAt?.let { "\nLast successful pull: $it" }.orEmpty()
+    return "$outcome · $attemptedAt$counts" + status.detail?.let { "\n$it" }.orEmpty() + lastSuccess
 }
 
 @Composable

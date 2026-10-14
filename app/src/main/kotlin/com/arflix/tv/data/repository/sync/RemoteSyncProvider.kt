@@ -93,9 +93,12 @@ interface RemoteSyncProvider {
  * Result of pulling a remote watchlist.
  * @param connected whether the provider was authenticated for the fetch
  * @param items mapped items, or null when the fetch failed
+ * @param failed true when every attempted provider request failed before it
+ * could return an authenticated result
  */
 data class RemoteWatchlistResult(
     val connected: Boolean,
     val items: List<MediaItem>?,
-    val rawCount: Int
+    val rawCount: Int,
+    val failed: Boolean = false
 )

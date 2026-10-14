@@ -52,6 +52,33 @@ class RemoteSyncManagerTest {
     }
 
     @Test
+    fun traktIsUsedAsWatchlistFallbackWhenReadRoutingIsStale() = runBlocking {
+        coEvery { store.readProviders(TrackingFeature.WATCHLIST) } returns setOf(SyncProvider.MDBLIST)
+        coEvery { trakt.getWatchlist() } returns RemoteWatchlistResult(
+            connected = true,
+            items = listOf(MediaItem(id = 7, title = "Fallback", mediaType = MediaType.MOVIE)),
+            rawCount = 1
+        )
+
+        val result = manager.getWatchlist()
+
+        assertEquals(listOf(7), result?.items?.map { it.id })
+        coVerify(exactly = 1) { trakt.getWatchlist() }
+    }
+
+    @Test
+    fun allWatchlistRequestFailuresAreNotReportedAsAnEmptyRemoteList() = runBlocking {
+        coEvery { store.readProviders(TrackingFeature.WATCHLIST) } returns setOf(SyncProvider.TRAKT)
+        coEvery { trakt.getWatchlist() } throws IllegalStateException("offline")
+
+        val result = manager.getWatchlist()
+
+        assertTrue(result?.failed == true)
+        assertTrue(result?.connected == false)
+        assertEquals(null, result?.items)
+    }
+
+    @Test
     fun writesReachBothProvidersAndOneFailureDoesNotBlockTheOther() = runBlocking {
         coEvery { store.writeProviders() } returns setOf(SyncProvider.TRAKT, SyncProvider.SIMKL)
         coEvery { trakt.addToWatchlist(any(), any(), any()) } throws IllegalStateException("offline")

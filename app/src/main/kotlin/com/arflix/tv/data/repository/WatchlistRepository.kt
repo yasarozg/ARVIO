@@ -2,6 +2,7 @@ package com.arflix.tv.data.repository
 
 import android.content.Context
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.arflix.tv.R
 import com.arflix.tv.data.api.TmdbApi
 import com.arflix.tv.data.model.MediaItem
@@ -41,6 +42,30 @@ data class LocalWatchlistItem(
     val sourceOrder: Int = Int.MAX_VALUE
 )
 
+/**
+ * The latest remote watchlist pull outcome for a profile. This is deliberately
+ * device-local: it explains what this device saw without becoming cloud-sync
+ * data that could conflict with a real membership change.
+ */
+enum class WatchlistRemoteSyncOutcome {
+    SUCCESS,
+    EMPTY,
+    PARTIAL,
+    NOT_CONFIGURED,
+    AUTH_REQUIRED,
+    REQUEST_FAILED,
+    TIMED_OUT
+}
+
+data class WatchlistRemoteSyncStatus(
+    val outcome: WatchlistRemoteSyncOutcome,
+    val attemptedAtMs: Long,
+    val lastSuccessfulAtMs: Long? = null,
+    val rawCount: Int? = null,
+    val mappedCount: Int? = null,
+    val detail: String? = null
+)
+
 internal fun normalizeWatchlistArtworkUrl(rawValue: String?, isBackdrop: Boolean): String? {
     val value = rawValue?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     if (
@@ -78,6 +103,8 @@ class WatchlistRepository @Inject constructor(
     // Profile-scoped DataStore key
     private fun watchlistKeyFor(profileId: String) = profileManager.profileStringKeyFor(profileId, "local_watchlist_v1")
     private fun changesKeyFor(profileId: String) = profileManager.profileStringKeyFor(profileId, "local_watchlist_changes_v1")
+    private fun remoteSyncStatusKeyFor(profileId: String) =
+        profileManager.profileStringKeyFor(profileId, "watchlist_remote_sync_status_v1")
     private val mutationMutex = Mutex()
 
     // In-memory cache for quick lookups
@@ -102,6 +129,47 @@ class WatchlistRepository @Inject constructor(
      */
     fun getCachedItems(): List<MediaItem> =
         if (cacheProfileId == profileManager.getProfileIdSync()) _watchlistItems.value else emptyList()
+
+    suspend fun getRemoteSyncStatus(): WatchlistRemoteSyncStatus? {
+        val profileId = profileManager.getProfileIdSync()
+        return withContext(Dispatchers.IO) {
+            runCatching {
+                context.traktDataStore.data.first()[remoteSyncStatusKeyFor(profileId)]
+                    ?.let { gson.fromJson(it, WatchlistRemoteSyncStatus::class.java) }
+            }.getOrNull()
+        }
+    }
+
+    suspend fun recordRemoteSyncStatus(
+        outcome: WatchlistRemoteSyncOutcome,
+        rawCount: Int? = null,
+        mappedCount: Int? = null,
+        detail: String? = null
+    ): WatchlistRemoteSyncStatus {
+        val profileId = profileManager.getProfileIdSync()
+        val now = System.currentTimeMillis()
+        val isSuccessful = outcome in setOf(
+            WatchlistRemoteSyncOutcome.SUCCESS,
+            WatchlistRemoteSyncOutcome.EMPTY,
+            WatchlistRemoteSyncOutcome.PARTIAL
+        )
+        var saved: WatchlistRemoteSyncStatus? = null
+        context.traktDataStore.edit { prefs ->
+            val previous = prefs[remoteSyncStatusKeyFor(profileId)]?.let {
+                runCatching { gson.fromJson(it, WatchlistRemoteSyncStatus::class.java) }.getOrNull()
+            }
+            saved = WatchlistRemoteSyncStatus(
+                outcome = outcome,
+                attemptedAtMs = now,
+                lastSuccessfulAtMs = if (isSuccessful) now else previous?.lastSuccessfulAtMs,
+                rawCount = rawCount,
+                mappedCount = mappedCount,
+                detail = detail?.take(160)
+            )
+            prefs[remoteSyncStatusKeyFor(profileId)] = gson.toJson(saved)
+        }
+        return requireNotNull(saved)
+    }
 
     /**
      * Load locally stored watchlist items without waiting for TMDB enrichment.

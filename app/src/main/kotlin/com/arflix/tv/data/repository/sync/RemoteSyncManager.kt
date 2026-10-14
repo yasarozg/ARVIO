@@ -70,7 +70,14 @@ class RemoteSyncManager @Inject constructor(
         writeResults { it.removeFromWatchlist(mediaType, tmdbId, isAnime) }
 
     suspend fun getWatchlist(): RemoteWatchlistResult? = coroutineScope {
-        val providers = connected(store.readProviders(TrackingFeature.WATCHLIST))
+        // A legacy/current Trakt connection is still a valid read fallback.  The
+        // previous code only considered the explicit read route here, while
+        // isRemoteConnected() also considered write routes. That could leave the
+        // UI believing a remote exists but never pulling its Trakt watchlist.
+        val configuredProviders = connected(store.readProviders(TrackingFeature.WATCHLIST))
+        val providers = configuredProviders.ifEmpty {
+            listOfNotNull(traktProvider.takeIf { it.isConnected() })
+        }
         if (providers.isEmpty()) return@coroutineScope null
         val results = providers.map { provider ->
             async {
@@ -83,7 +90,15 @@ class RemoteSyncManager @Inject constructor(
                 }
             }
         }.awaitAll().filterNotNull()
-        if (results.isEmpty()) return@coroutineScope RemoteWatchlistResult(true, null, 0)
+        // Do not turn an exception from every provider into a successful empty
+        // response. Consumers must retain their cache and surface the failed
+        // refresh instead.
+        if (results.isEmpty()) return@coroutineScope RemoteWatchlistResult(
+            connected = false,
+            items = null,
+            rawCount = 0,
+            failed = true
+        )
         val items = results.flatMap { it.items.orEmpty() }
             .distinctBy { it.mediaType to it.id }
         RemoteWatchlistResult(
