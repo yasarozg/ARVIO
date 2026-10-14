@@ -3777,7 +3777,10 @@ fun PlayerScreen(
                     maxBufferMs = playbackBufferProfile.maxBufferMs,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 24.dp, end = 32.dp)
+                        // The player clock and "Ends at" text own the top-right
+                        // corner whenever TV controls are visible. Keep this badge
+                        // beneath that block in every playback/loading state.
+                        .padding(top = PlayerBufferingBadgeTopOffset, end = 48.dp)
                 )
             }
         }
@@ -5159,7 +5162,7 @@ internal fun PlayerLoadingOverlay(
                     maxBufferMs = maxBufferMs,
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 24.dp, end = 32.dp)
+                        .padding(top = PlayerBufferingBadgeTopOffset, end = 48.dp)
                         .zIndex(52f)
                 )
             }
@@ -5205,6 +5208,10 @@ private fun BufferingProgressBadge(
         }
     }
 }
+
+// Matches the TV controls' right-side clock block (30.dp top inset plus time and
+// "Ends at" rows), leaving a small gap so the buffer status never overlaps it.
+private val PlayerBufferingBadgeTopOffset = 104.dp
 
 @OptIn(ExperimentalTvMaterial3Api::class)
 @Composable
