@@ -52,11 +52,11 @@ import com.arflix.tv.data.repository.*
 import com.arflix.tv.ui.components.*
 import com.arflix.tv.ui.skin.resolveAccentColor
 import com.arflix.tv.util.LocalDeviceType
+import com.arflix.tv.util.LocalAppLanguage
+import com.arflix.tv.util.formatAppDateTime
 import com.arflix.tv.util.tr
 import com.arflix.tv.ui.screens.watchlist.calendar.*
-import java.text.DateFormat
 import java.time.LocalDate
-import java.util.Date
 
 internal enum class LibrarySection(val label: String) { WATCHLISTS("Watchlists"), LISTS("My lists"), SERVERS("Homeserver"), CALENDAR("Calendar") }
 internal val LibraryTabsTopInset = AppTopBarHeight - 8.dp
@@ -93,6 +93,7 @@ fun WatchlistScreen(
     val servers by viewModel.libraryState.collectAsStateWithLifecycle()
     val logos by viewModel.logoUrls.collectAsStateWithLifecycle()
     val touch = LocalDeviceType.current.isTouchDevice()
+    val appLanguage = LocalAppLanguage.current
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val poster = rememberCardLayoutMode() == CardLayoutMode.POSTER
     val scrollScope = rememberCoroutineScope()
@@ -317,7 +318,7 @@ fun WatchlistScreen(
     }
     if(syncStatusOpen) OledDrawer(tr("Watchlist sync"), { syncStatusOpen = false }) {
         Text(
-            watchlistSyncStatusLabel(state.remoteSyncStatus),
+            watchlistSyncStatusLabel(state.remoteSyncStatus, appLanguage),
             color = if (state.remoteSyncStatus?.outcome in setOf(
                     WatchlistRemoteSyncOutcome.SUCCESS,
                     WatchlistRemoteSyncOutcome.EMPTY
@@ -350,12 +351,11 @@ fun WatchlistScreen(
         onConfirm = { query = it.trim(); search = false }, onCancel = { search = false })
 }
 
-internal fun watchlistSyncStatusLabel(status: WatchlistRemoteSyncStatus?): String {
+internal fun watchlistSyncStatusLabel(status: WatchlistRemoteSyncStatus?, languageTag: String): String {
     if (status == null) return "No remote sync attempt on this device yet"
-    val attemptedAt = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-        .format(Date(status.attemptedAtMs))
+    val attemptedAt = formatAppDateTime(status.attemptedAtMs, languageTag)
     val lastSuccessfulAt = status.lastSuccessfulAtMs?.let {
-        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(it))
+        formatAppDateTime(it, languageTag)
     }
     val counts = if (status.rawCount != null && status.mappedCount != null) {
         " · remote ${status.rawCount}, shown ${status.mappedCount}"

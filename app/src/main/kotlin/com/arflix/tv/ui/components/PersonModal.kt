@@ -76,27 +76,15 @@ import com.arflix.tv.ui.theme.ArflixTypography
 import com.arflix.tv.ui.theme.Pink
 import com.arflix.tv.ui.theme.TextPrimary
 import com.arflix.tv.ui.theme.TextSecondary
-import java.text.SimpleDateFormat
-import java.util.Locale
+import com.arflix.tv.util.LocalAppLanguage
+import com.arflix.tv.util.formatAppDate
 
 /**
  * Formats a TMDB birthday string ("yyyy-MM-dd") to the app-standard "d MMM yyyy" format.
- * Matches [com.arflix.tv.data.repository.MediaRepository.formatDate] and
- * [com.arflix.tv.ui.screens.details.DetailsScreen.formatEpisodeAirDateLabel].
+ * Uses the same app-language date formatter as the rest of the UI.
  */
-private fun formatBirthday(dateStr: String?): String {
-    if (dateStr.isNullOrEmpty()) return ""
-    return try {
-        val inputFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        val outputFormat = SimpleDateFormat("d MMM yyyy", Locale.US)
-        val date = inputFormat.parse(dateStr)
-        date?.let { outputFormat.format(it) } ?: dateStr
-    } catch (e: Exception) {
-        if (e is kotlinx.coroutines.CancellationException) throw e
-
-        dateStr
-    }
-}
+private fun formatBirthday(dateStr: String?, languageTag: String): String =
+    formatAppDate(dateStr, languageTag)
 
 /**
  * Premium full-screen modal for displaying person/cast details
@@ -115,6 +103,7 @@ fun PersonModal(
     val scrollState = rememberScrollState()
     val focusRequester = remember { FocusRequester() }
     val isRtl = LocalLayoutDirection.current == LayoutDirection.Rtl
+    val appLanguage = LocalAppLanguage.current
 
     // Request focus when modal becomes visible
     androidx.compose.runtime.LaunchedEffect(isVisible) {
@@ -287,7 +276,7 @@ fun PersonModal(
                         // Birth info - subtle
                         if (person.birthday != null) {
                             Text(
-                                text = formatBirthday(person.birthday),
+                                text = formatBirthday(person.birthday, appLanguage),
                                 style = ArflixTypography.body.copy(fontSize = 13.sp),
                                 color = TextSecondary.copy(alpha = 0.7f)
                             )
@@ -398,6 +387,7 @@ private fun MobilePersonContent(
     onMediaClick: (MediaType, Int) -> Unit,
     onClose: () -> Unit
 ) {
+    val appLanguage = LocalAppLanguage.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -469,7 +459,7 @@ private fun MobilePersonContent(
             if (person.birthday != null) {
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = formatBirthday(person.birthday),
+                    text = formatBirthday(person.birthday, appLanguage),
                     style = ArflixTypography.body.copy(fontSize = 13.sp),
                     color = TextSecondary.copy(alpha = 0.7f)
                 )

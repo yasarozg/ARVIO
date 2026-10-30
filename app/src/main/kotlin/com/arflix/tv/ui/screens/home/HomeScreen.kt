@@ -161,6 +161,8 @@ import com.arflix.tv.ui.components.MobileHeroLayoutSpec
 import com.arflix.tv.ui.components.resolveMobileHeroLayout
 import com.arflix.tv.ui.components.ProfileAvatarVisual
 import com.arflix.tv.util.LocalDeviceType
+import com.arflix.tv.util.LocalAppLanguage
+import com.arflix.tv.util.formatAppDate
 import com.arflix.tv.util.TmdbImageSizing
 import com.arflix.tv.ui.components.MediaContextMenu
 import com.arflix.tv.ui.components.rememberCardLayoutMode
@@ -2044,6 +2046,7 @@ private fun HomeHeroLayer(
     isIptvItem: (MediaItem) -> Boolean = { false },
     getIptvChannelId: (MediaItem) -> String? = { null }
 ) {
+    val appLanguage = LocalAppLanguage.current
     if (isMobile) {
         // Mobile hero is rendered inline inside MobileHomeRowsLayer's LazyColumn — no fixed overlay needed.
     } else {
@@ -2303,6 +2306,7 @@ private fun MobileHeroCarousel(
     onPreloadHeroImdbRatings: (List<MediaItem>) -> Unit = {}
 ) {
     val context = LocalContext.current
+    val appLanguage = LocalAppLanguage.current
     val density = LocalDensity.current
     val heroItems = remember(categories) {
         val eligibleRows = categories.filter {
@@ -2460,13 +2464,11 @@ private fun MobileHeroCarousel(
                 context.genreNames(item.mediaType, item.genreIds).take(3)
             }
             // releaseDate is stored as "d MMM yyyy" by MediaRepository.formatDate()
-            val year = remember(item.id, item.releaseDate, item.year) {
+            val year = remember(item.id, item.releaseDate, item.year, appLanguage) {
                 val rd = item.releaseDate
                 if (!rd.isNullOrBlank()) {
-                    runCatching {
-                        val parsed = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.ENGLISH).parse(rd)
-                        parsed?.let { java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).format(it) }
-                    }.getOrNull() ?: item.year
+                    val formatted = formatAppDate(rd, appLanguage, fallback = item.year)
+                    formatted.substringBeforeLast(' ', missingDelimiterValue = formatted)
                 } else {
                     item.year
                 }

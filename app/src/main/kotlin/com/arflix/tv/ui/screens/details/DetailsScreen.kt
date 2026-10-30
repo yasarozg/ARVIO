@@ -219,7 +219,9 @@ import com.arflix.tv.ui.theme.TextPrimary
 import com.arflix.tv.ui.theme.TextSecondary
 import com.arflix.tv.util.Constants
 import com.arflix.tv.util.LocalDeviceType
+import com.arflix.tv.util.LocalAppLanguage
 import com.arflix.tv.util.TmdbImageSizing
+import com.arflix.tv.util.formatAppDate
 import com.arflix.tv.util.formatGenreName
 import com.arflix.tv.util.isInCinema
 import com.arflix.tv.util.parseRatingValue
@@ -262,6 +264,7 @@ fun DetailsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val usePosterCards = rememberCatalogueRowLayoutMode("details:similar") == CardLayoutMode.POSTER
     val context = LocalContext.current
+    val appLanguage = LocalAppLanguage.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val isMobile = LocalDeviceType.current.isTouchDevice()
 
@@ -885,17 +888,34 @@ fun DetailsScreen(
                     val selectedProgress = selectedEpisode?.let {
                         uiState.episodePlaybackProgress[it.identity]
                     }
-                    val effectivePlayLabel = selectedEpisode?.let { episode ->
-                        context.getString(
+                    val resumeTimeLabel = uiState.playPositionMs
+                        ?.takeIf { it > 0L }
+                        ?.let { formatResumePositionLabel(it) }
+                    val playSeason = uiState.playSeason
+                    val playEpisode = uiState.playEpisode
+                    val effectivePlayLabel = when {
+                        mediaType == MediaType.TV &&
+                            playSeason != null &&
+                            playEpisode != null &&
+                            resumeTimeLabel != null -> stringResource(
+                                R.string.continue_season_episode_at,
+                                playSeason,
+                                playEpisode,
+                                resumeTimeLabel
+                            )
+                        mediaType == MediaType.MOVIE && resumeTimeLabel != null ->
+                            stringResource(R.string.continue_at, resumeTimeLabel)
+                        selectedEpisode != null -> stringResource(
                             if (selectedProgress != null) {
                                 R.string.continue_season_episode
                             } else {
                                 R.string.play_season_episode
                             },
-                            episode.seasonNumber,
-                            episode.episodeNumber
+                            selectedEpisode.seasonNumber,
+                            selectedEpisode.episodeNumber
                         )
-                    } ?: uiState.playLabel
+                        else -> uiState.playLabel
+                    }
                     DetailsContent(
                         item = item,
                         logoUrl = uiState.logoUrl,
@@ -3999,6 +4019,7 @@ internal fun EpisodeCard(
 ) {
     val aspectRatio = 16f / 9f
     val context = LocalContext.current
+    val appLanguage = LocalAppLanguage.current
     val density = LocalDensity.current
     val metadataLogoImageLoader = context.imageLoader
 
@@ -4032,7 +4053,7 @@ internal fun EpisodeCard(
             .trim()
             .ifEmpty { noSynopsisText }
     }
-    val episodeAirDateLabel = remember(episode.airDate) { formatEpisodeAirDateLabel(episode.airDate) }
+    val episodeAirDateLabel = remember(episode.airDate, appLanguage) { formatAppDate(episode.airDate, appLanguage) }
     val isEpisodeUnaired = remember(episode.airDate) { isFutureEpisodeAirDate(episode.airDate) }
 
     ArvioFocusableSurface(
@@ -4215,16 +4236,15 @@ internal fun EpisodeCard(
     }
 }
 
-private fun formatEpisodeAirDateLabel(rawDate: String): String? {
-    val value = rawDate.trim()
-    if (value.isEmpty()) return null
-    return try {
-        val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-        parser.isLenient = false
-        val date = parser.parse(value) ?: return value
-        SimpleDateFormat("d MMM yyyy", Locale.US).format(date)
-    } catch (_: Exception) {
-        value
+private fun formatResumePositionLabel(positionMs: Long): String {
+    val totalSeconds = (positionMs / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format(Locale.US, "%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format(Locale.US, "%d:%02d", minutes, seconds)
     }
 }
 

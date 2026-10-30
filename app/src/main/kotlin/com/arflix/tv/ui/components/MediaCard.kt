@@ -48,6 +48,8 @@ import com.arflix.tv.ui.skin.ArvioFocusableSurface
 import com.arflix.tv.ui.skin.ArvioSkin
 import com.arflix.tv.ui.skin.rememberArvioCardShape
 import com.arflix.tv.util.LocalDeviceType
+import com.arflix.tv.util.LocalAppLanguage
+import com.arflix.tv.util.formatAppDate
 import com.arflix.tv.util.TmdbImageSizing
 import com.arflix.tv.util.Constants
 import androidx.compose.foundation.shape.CircleShape
@@ -100,6 +102,7 @@ fun MediaCard(
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val appLanguage = LocalAppLanguage.current
     // If this is a placeholder card, show skeleton only
     if (item.isPlaceholder) {
         PlaceholderCard(
@@ -531,8 +534,10 @@ fun MediaCard(
                 val tvSeriesLabel = stringResource(R.string.component_label_tv_series)
                 val movieLabel = stringResource(R.string.movie)
                 val mediaLabel = stringResource(R.string.component_label_media)
-                val subtitle = remember(item.subtitle, item.releaseDate, item.year, item.mediaType, tvSeriesLabel, movieLabel, mediaLabel) {
-                    val release = item.releaseDate?.takeIf { it.isNotBlank() }
+                val subtitle = remember(item.subtitle, item.releaseDate, item.year, item.mediaType, tvSeriesLabel, movieLabel, mediaLabel, appLanguage) {
+                    val release = item.releaseDate?.takeIf { it.isNotBlank() }?.let {
+                        formatAppDate(it, appLanguage, fallback = it)
+                    }
                         ?: item.year.takeIf { it.isNotBlank() }
                     release
                         ?: item.subtitle.ifBlank {
