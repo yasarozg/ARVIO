@@ -40,4 +40,12 @@ class EpisodeAvailabilityTest {
     fun missingDateFailsClosedForWatchActions() {
         assertThat(EpisodeAvailability.hasAired("", today)).isFalse()
     }
+
+    @Test
+    fun displayFilterHidesFutureEpisodesButKeepsUnknownDates() {
+        val episodes = listOf("2026-09-12", "2026-09-14", "")
+        assertThat(EpisodeAvailability.filterAiredForDisplay(episodes, { it }, today))
+            .containsExactly("2026-09-12", "")
+            .inOrder()
+    }
 }

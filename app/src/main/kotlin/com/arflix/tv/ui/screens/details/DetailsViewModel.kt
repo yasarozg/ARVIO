@@ -259,6 +259,7 @@ class DetailsViewModel @Inject constructor(
     private val streamIntegrationRepository: StreamIntegrationRepository,
     private val recentPlayedSourceRepository: RecentPlayedSourceRepository
 ) : ViewModel() {
+    private var showUnairedEpisodes = false
 
     companion object {
         private const val TAG = "DetailsViewModel"
@@ -336,7 +337,7 @@ class DetailsViewModel @Inject constructor(
                             } else {
                                 cachedAnime
                             }
-                            _uiState.value = _uiState.value.copy(episodes = decorated)
+                            _uiState.value = _uiState.value.copy(episodes = episodesForDisplay(decorated))
                         }
                     } else if (seasonNumber == _uiState.value.currentSeason) {
                         val cached = mediaRepository.peekCachedSeasonEpisodes(tvId, seasonNumber)
@@ -356,7 +357,7 @@ class DetailsViewModel @Inject constructor(
                             } else {
                                 normalized
                             }
-                            _uiState.value = _uiState.value.copy(episodes = decorated)
+                            _uiState.value = _uiState.value.copy(episodes = episodesForDisplay(decorated))
                         }
                     }
                 }
@@ -458,6 +459,7 @@ class DetailsViewModel @Inject constructor(
                 val autoPlayMinQuality = normalizeAutoPlayMinQuality(prefs[autoPlayMinQualityKey()])
                 val showBudget = prefs[showBudgetKey()] ?: true
                 val showEpisodeRatings = prefs[showEpisodeRatingsKey()] ?: false
+                showUnairedEpisodes = prefs[profileManager.profileBooleanKey("show_unaired_episodes")] ?: false
                 val animeStructuringStyle = AnimeStructuringStyle.fromId(prefs[animeStructuringStyleKey()])
 
                 val previousState = _uiState.value
@@ -518,7 +520,7 @@ class DetailsViewModel @Inject constructor(
                     item = initialItem,
                     isInWatchlist = watchlistSaveState.wanted ?: false,
                     logoUrl = cachedLogoUrl,
-                    episodes = cachedEpisodes ?: emptyList(),
+                    episodes = episodesForDisplay(cachedEpisodes ?: emptyList()),
                     currentSeason = seasonToLoad,
                     totalSeasons = cachedTotalSeasons,
                     playSeason = initialSeason,
@@ -756,7 +758,7 @@ class DetailsViewModel @Inject constructor(
                     hasAlternateAnimeStructure = (availableAnimeStructure != null),
                     totalSeasons = resolvedTotalSeasons,
                     currentSeason = resolvedCurrentSeason,
-                    episodes = resolvedEpisodes,
+                    episodes = episodesForDisplay(resolvedEpisodes),
                     initialSeasonIndex = initialSeasonIndex,
                     genres = genreNames,
                     language = languageName,
@@ -1025,7 +1027,7 @@ class DetailsViewModel @Inject constructor(
                             val shouldUseEpisodeTarget = !hasExplicitEpisodeTarget &&
                                 (state.playLabel.isNullOrBlank() || state.playLabel == context.getString(R.string.play_start_s1e1))
                             state.copy(
-                                episodes = decoratedEpisodes,
+                                episodes = episodesForDisplay(decoratedEpisodes),
                                 episodePlaybackProgress = playbackProgress,
                                 initialEpisodeIndex = initialEpisodeIndex,
                                 playSeason = if (shouldUseEpisodeTarget) {
@@ -1290,11 +1292,11 @@ class DetailsViewModel @Inject constructor(
             }
             _uiState.value = _uiState.value.copy(
                 currentSeason = seasonNumber,
-                episodes = decorated,
+                episodes = episodesForDisplay(decorated),
                 episodePlaybackProgress = emptyMap(),
                 isSeasonLoading = false
             )
-            refreshEpisodePlaybackProgress(decorated)
+            refreshEpisodePlaybackProgress(episodesForDisplay(decorated))
             prefetchAdjacentSeasons(currentMediaId, seasonNumber, _uiState.value.totalSeasons)
             return
         }
@@ -1345,11 +1347,11 @@ class DetailsViewModel @Inject constructor(
                     // Re-check after the watched-status fetch so a superseded request never overwrites
                     if (seasonLoadRequestedSeason != seasonNumber) return@launch
                     _uiState.value = _uiState.value.copy(
-                        episodes = decoratedEpisodes,
+                        episodes = episodesForDisplay(decoratedEpisodes),
                         currentSeason = seasonNumber,
                         isSeasonLoading = false
                     )
-                    refreshEpisodePlaybackProgress(decoratedEpisodes)
+                    refreshEpisodePlaybackProgress(episodesForDisplay(decoratedEpisodes))
                     prefetchAdjacentSeasons(currentMediaId, seasonNumber, _uiState.value.totalSeasons)
                 } else {
                     _uiState.value = _uiState.value.copy(
@@ -1435,8 +1437,13 @@ class DetailsViewModel @Inject constructor(
                     episodeNumber = identity.displayEpisode,
                     identity = identity
                 )
-        }
+        }.let(::episodesForDisplay)
     }
+
+    /** Details rails show released episodes only; unknown dates remain visible for incomplete metadata. */
+    private fun episodesForDisplay(episodes: List<Episode>): List<Episode> =
+        if (showUnairedEpisodes) episodes else
+            EpisodeAvailability.filterAiredForDisplay(episodes, airDate = { it.airDate })
 
     fun resolveEpisodeIdentity(
         displaySeason: Int?,

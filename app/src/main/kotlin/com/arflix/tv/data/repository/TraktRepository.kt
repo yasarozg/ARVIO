@@ -2030,7 +2030,11 @@ class TraktRepository @Inject constructor(
                             }
 
                             val nextEpisode = progress.nextEpisode ?: return@withPermit null
-                            if (progress.aired <= 0 || progress.completed >= progress.aired) return@withPermit null
+                            // Trakt can lag behind the broadcaster on `aired` while still
+                            // returning the real next episode. Home validates that episode
+                            // against its air date, so do not discard a just-released episode
+                            // solely because completed == aired.
+                            if (progress.aired <= 0) return@withPermit null
                             if (!includeSpecials && nextEpisode.season == 0) return@withPermit null
 
                             val activityAt = progress.lastWatchedAt

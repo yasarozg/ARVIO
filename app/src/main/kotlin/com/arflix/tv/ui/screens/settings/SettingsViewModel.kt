@@ -240,6 +240,7 @@ data class SettingsUiState(
     val trailerInCards: Boolean = true,
     val showBudget: Boolean = true,
     val showEpisodeRatings: Boolean = false,
+    val showUnairedEpisodes: Boolean = false,
     val animeStructuringStyle: AnimeStructuringStyle = AnimeStructuringStyle.BROADCAST,
     /** Pin the IPTV "Favorite TV" row to the top of the home screen. */
     val iptvFavoritesOnHome: Boolean = true,
@@ -489,6 +490,7 @@ class SettingsViewModel @Inject constructor(
     private fun trailerInCardsKey() = profileManager.profileBooleanKey("trailer_in_cards")
     private fun showBudgetKey() = profileManager.profileBooleanKey("show_budget_on_home")
     private fun showEpisodeRatingsKey() = profileManager.profileBooleanKey("show_episode_ratings")
+    private fun showUnairedEpisodesKey() = profileManager.profileBooleanKey("show_unaired_episodes")
     private fun animeStructuringStyleKey() = profileManager.profileStringKey(AnimeStructuringStyle.PREFERENCE_KEY)
     private fun iptvFavoritesOnHomeKey() =
         profileManager.profileBooleanKey(com.arflix.tv.util.IPTV_FAVORITES_ON_HOME)
@@ -720,6 +722,7 @@ class SettingsViewModel @Inject constructor(
             val spoilerBlurEnabled = prefs[spoilerBlurKey()] ?: false
             val showBudget = prefs[showBudgetKey()] ?: true
             val showEpisodeRatings = prefs[showEpisodeRatingsKey()] ?: false
+            val showUnairedEpisodes = prefs[showUnairedEpisodesKey()] ?: false
             val animeStructuringStyle = AnimeStructuringStyle.fromId(prefs[animeStructuringStyleKey()])
             val iptvFavoritesOnHome = prefs[iptvFavoritesOnHomeKey()] ?: true
             val clockFormat = prefs[clockFormatKey()] ?: "24h"
@@ -839,6 +842,7 @@ class SettingsViewModel @Inject constructor(
                 trailerInCards = trailerInCards,
                 showBudget = showBudget,
                 showEpisodeRatings = showEpisodeRatings,
+                showUnairedEpisodes = showUnairedEpisodes,
                 animeStructuringStyle = animeStructuringStyle,
                 iptvFavoritesOnHome = iptvFavoritesOnHome,
                 volumeBoostDb = volumeBoostDb,
@@ -1934,6 +1938,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             context.settingsDataStore.edit { it[showEpisodeRatingsKey()] = enabled }
             _uiState.value = _uiState.value.copy(showEpisodeRatings = enabled)
+            syncLocalStateToCloud(silent = true)
+        }
+    }
+
+    fun setShowUnairedEpisodes(enabled: Boolean) {
+        viewModelScope.launch {
+            context.settingsDataStore.edit { it[showUnairedEpisodesKey()] = enabled }
+            _uiState.value = _uiState.value.copy(showUnairedEpisodes = enabled)
             syncLocalStateToCloud(silent = true)
         }
     }

@@ -5,6 +5,12 @@ import java.time.LocalDate
 
 /** Shared release-date rule for episode actions and Continue Watching eligibility. */
 internal object EpisodeAvailability {
+    fun <T> filterAiredForDisplay(
+        episodes: List<T>,
+        airDate: (T) -> String?,
+        today: LocalDate = LocalDate.now(),
+    ): List<T> = episodes.filter { hasAired(airDate(it), today, unknownIsAired = true) }
+
     fun markWatchedIfAired(episode: Episode, today: LocalDate = LocalDate.now()): Episode =
         if (hasAired(episode.airDate, today)) episode.copy(isWatched = true) else episode
 

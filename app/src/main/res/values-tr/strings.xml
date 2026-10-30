@@ -1,5 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="continue_watching">İzlemeye Devam Et</string>
+    <string name="details_no_synopsis">Bölüm özeti mevcut değil.</string>
+    <string name="continue_season_episode">S%1$dB%2$d bölümüne devam et</string>
+    <string name="play_season_episode">S%1$dB%2$d bölümünü oynat</string>
+    <string name="continue_season_episode_at">S%1$dB%2$d bölümüne %3$s itibarıyla devam et</string>
+    <string name="continue_at">%1$s itibarıyla devam et</string>
+    <string name="continue_from">%1$s itibarıyla devam et</string>
+    <string name="continue_label">Devam et</string>
+    <string name="play_start_s1e1">S1B1 bölümünü başlat</string>
+    <string name="launcher_continue_from">%1$s — %2$s</string>
+    <string name="show_episode_ratings">Bölüm puanlarını göster</string>
+    <string name="show_episode_ratings_desc">Bölüm listesinin altında bölüm puanlarını görsel bir satır olarak göster</string>
+    <string name="show_unaired_episodes">Gelecekteki bölümleri göster</string>
+    <string name="show_unaired_episodes_desc">Yayın tarihi henüz gelmemiş bölümleri de dahil et</string>
+    <string name="spoiler_blur_desc">İzlenmemiş bölümlerde spoilerları önlemek için kart görsellerini bulanıklaştır</string>
+    <string name="anime_episode_structuring">Anime bölüm sıralaması</string>
+    <string name="anime_episode_structuring_desc">Yayın sırası (cour) ile standart (TMDB) sezonları arasında geçiş yap</string>
+    <string name="anime_structuring_broadcast">Yayın sırası</string>
+    <string name="anime_structuring_standard">Standart (TMDB)</string>
+    <string name="anime_structuring_japanese">Yayın sırası</string>
+    <string name="anime_structuring_western">Standart (TMDB)</string>
+    <string name="anime_structuring_switch_to_western">Standart (TMDB) sırasına geç</string>
+    <string name="anime_structuring_switch_to_japanese">Yayın sırasına geç</string>
+    <string name="anime_structuring_toggled_japanese">Yayın sırasına geçildi</string>
+    <string name="anime_structuring_toggled_western">Standart (TMDB) sırasına geçildi</string>
     <string name="home">Ana sayfa</string>
     <string name="search">Ara</string>
     <string name="watchlist">İzleme listesi</string>

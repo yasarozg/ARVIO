@@ -213,6 +213,8 @@
     <string name="show_budget_desc">Display the movie budget on the home hero banner</string>
     <string name="show_episode_ratings">Show Episode Ratings</string>
     <string name="show_episode_ratings_desc">Display episode ratings as a visual row below the episode list</string>
+    <string name="show_unaired_episodes">Show Future Episodes</string>
+    <string name="show_unaired_episodes_desc">Include episodes whose release date has not arrived yet</string>
     <string name="spoiler_blur">Spoiler Blur</string>
     <string name="spoiler_blur_desc">Blur unwatched episode cards to avoid spoilers</string>
     <string name="anime_episode_structuring">Anime Episode Ordering</string>

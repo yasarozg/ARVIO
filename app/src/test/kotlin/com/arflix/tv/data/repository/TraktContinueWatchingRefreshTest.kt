@@ -110,6 +110,13 @@ class TraktContinueWatchingRefreshTest {
         coVerify(exactly = 1) { api.getShowProgress(any(), any(), any(), any(), any(), any(), any()) }
     }
 
+    @Test fun nextEpisodeIsKeptWhenTraktAiredCountLagsBehind() = runBlocking {
+        coEvery { api.getShowProgress(any(), any(), any(), any(), any(), any(), any()) } returns
+            TraktShowProgress(1, 1, stamp, null, TraktNextEpisode(1, 2, "New episode", TraktIds()), emptyList())
+
+        assertEquals(2, repository.getContinueWatching(true).single().episode)
+    }
+
     @Test fun pausedShowReturnsToUpNextWithoutAnotherShowProgressRead() = runBlocking {
         val paused = TraktPlaybackItem(1L, 20f, stamp, "episode", null,
             TraktEpisodeInfo(1, 2, "Paused", TraktIds(), 45), show)
