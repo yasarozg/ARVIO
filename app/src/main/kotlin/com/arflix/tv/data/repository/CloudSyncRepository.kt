@@ -803,9 +803,8 @@ class CloudSyncRepository @Inject constructor(
         )
         root.put("profileSettingsById", JSONObject(gson.toJson(profileSettingsById)))
 
-        // Trakt tokens per profile
-        val traktTokens = traktRepository.exportTokensForProfiles(profiles.map { it.id })
-        root.put("traktTokens", JSONObject(gson.toJson(traktTokens)))
+        // Trakt OAuth tokens are device-local. Sharing them through the cloud can
+        // make two TVs overwrite or invalidate each other's refresh sessions.
 
         // MDBList selection (provider + API key) per profile
         val mdbListSyncByProfile = syncProviderStore.exportForProfiles(profiles.map { it.id })
@@ -1118,15 +1117,10 @@ class CloudSyncRepository @Inject constructor(
         } else {
             payload
         }
-        val traktMerged = if (existingRemotePayload != null) {
-            mergeRemoteTraktTokens(groupOrderMerged, existingRemotePayload)
+        val trackingMerged = if (existingRemotePayload != null) {
+            mergeRemoteTrackingPreferences(groupOrderMerged, existingRemotePayload)
         } else {
             groupOrderMerged
-        }
-        val trackingMerged = if (existingRemotePayload != null) {
-            mergeRemoteTrackingPreferences(traktMerged, existingRemotePayload)
-        } else {
-            traktMerged
         }
         // Field-level merge against the already-loaded remote: keep local fields we changed more
         // recently, but never overwrite a cloud field with an older local value. This is what stops
@@ -1225,6 +1219,9 @@ class CloudSyncRepository @Inject constructor(
                 )
             }
             root.put("iptvEpgUrl", "")
+            // Trakt OAuth sessions are device-local and must never be uploaded.
+            // Remove this field as a migration safeguard from older snapshots.
+            root.remove("traktTokens")
             root.toString()
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error
@@ -1289,31 +1286,6 @@ class CloudSyncRepository @Inject constructor(
                     local = localSelection,
                     remote = remoteSelection
                 )
-            }
-            localRoot.toString()
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            localPayload
-        }
-    }
-
-    private fun mergeRemoteTraktTokens(localPayload: String, remotePayload: String): String {
-        return try {
-            val localRoot = JSONObject(localPayload)
-            val remoteTokens = JSONObject(remotePayload).optJSONObject("traktTokens")
-                ?: return localPayload
-            val localTokens = localRoot.optJSONObject("traktTokens")
-                ?: JSONObject().also { localRoot.put("traktTokens", it) }
-            val profileIds = remoteTokens.keys()
-            while (profileIds.hasNext()) {
-                val profileId = profileIds.next()
-                val remoteToken = remoteTokens.optJSONObject(profileId) ?: continue
-                val localToken = localTokens.optJSONObject(profileId)
-                val remoteUpdatedAt = remoteToken.optLong("updatedAt", 0L)
-                val localUpdatedAt = localToken?.optLong("updatedAt", 0L) ?: 0L
-                if (localToken == null || remoteUpdatedAt >= localUpdatedAt) {
-                    localTokens.put(profileId, JSONObject(remoteToken.toString()))
-                }
             }
             localRoot.toString()
         } catch (e: Exception) {
@@ -1576,7 +1548,6 @@ class CloudSyncRepository @Inject constructor(
         val profileObjectFields = listOf(
             "profileAvatarImagesById",
             "profileSettingsById",
-            "traktTokens",
             "mdbListSyncByProfile",
             "dismissedContinueWatchingByProfile",
             "localContinueWatchingByProfile",
@@ -1979,18 +1950,6 @@ class CloudSyncRepository @Inject constructor(
         }
         authRepository.saveAutoPlayNextToProfile(fallbackAutoPlayNext)
 
-        // ── Trakt tokens ──
-        try {
-            root.optJSONObject("traktTokens")?.toString()?.takeIf { it.isNotBlank() }?.let { json ->
-                val type = TypeToken.getParameterized(Map::class.java, String::class.java, TraktRepository.CloudTraktToken::class.java).type
-                val tokens: Map<String, TraktRepository.CloudTraktToken> = gson.fromJson(json, type) ?: emptyMap()
-                traktRepository.importTokensForProfiles(tokens)
-            }
-        } catch (e: Exception) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            AppLogger.recordException(e, mapOf("error_area" to "CloudSync", "cloud_flow" to "apply_trakt_tokens"))
-        }
-
         // ── MDBList selection (provider + API key) ──
         try {
             root.optJSONObject("mdbListSyncByProfile")?.toString()?.takeIf { it.isNotBlank() }?.let { json ->
@@ -2163,26 +2122,6 @@ class CloudSyncRepository @Inject constructor(
                 val type = TypeToken.getParameterized(Map::class.java, String::class.java, TypeToken.getParameterized(List::class.java, ContinueWatchingItem::class.java).type).type
                 val map: Map<String, List<ContinueWatchingItem>> = gson.fromJson(json, type) ?: emptyMap()
                 val traktProfiles = mutableSetOf<String>()
-
-                val traktTokenType = TypeToken.getParameterized(Map::class.java, String::class.java, TraktRepository.CloudTraktToken::class.java).type
-                val traktTokens = root.optJSONObject("traktTokens")
-                    ?.toString()
-                    ?.takeIf { it.isNotBlank() }
-                    ?.let { tokenJson ->
-                        try {
-                            gson.fromJson<Map<String, TraktRepository.CloudTraktToken>>(tokenJson, traktTokenType)
-                        } catch (e: Exception) {
-                            if (e is kotlinx.coroutines.CancellationException) throw e
-                            null
-                        }
-                    }
-                    .orEmpty()
-
-                traktTokens.forEach { (profileId, token) ->
-                    if (profileId.isNotBlank() && !token.accessToken.isNullOrBlank()) {
-                        traktProfiles.add(profileId)
-                    }
-                }
 
                 val isActiveProfileTrakt = try {
                     traktRepository.isAuthenticated.first()

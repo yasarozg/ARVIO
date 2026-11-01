@@ -1394,7 +1394,27 @@ class WatchlistViewModel @Inject constructor(
         detail: String? = null
     ) {
         try {
-            val status = watchlistRepository.recordRemoteSyncStatus(outcome, rawCount, mappedCount, detail)
+            val authDiagnostics = runCatching { traktRepository.getAuthDiagnostics() }.getOrNull()
+            val refreshFailed = !authDiagnostics?.refreshFailure.isNullOrBlank()
+            val effectiveOutcome = if (
+                outcome == WatchlistRemoteSyncOutcome.NOT_CONFIGURED && refreshFailed
+            ) {
+                WatchlistRemoteSyncOutcome.AUTH_REQUIRED
+            } else {
+                outcome
+            }
+            val effectiveDetail = if (effectiveOutcome == WatchlistRemoteSyncOutcome.AUTH_REQUIRED && refreshFailed) {
+                "Trakt refresh failed: ${authDiagnostics?.refreshFailure}"
+            } else {
+                detail
+            }
+            val status = watchlistRepository.recordRemoteSyncStatus(
+                outcome = effectiveOutcome,
+                rawCount = rawCount,
+                mappedCount = mappedCount,
+                detail = effectiveDetail,
+                authDiagnostics = authDiagnostics
+            )
             _uiState.value = _uiState.value.copy(remoteSyncStatus = status)
         } catch (error: Exception) {
             if (error is kotlinx.coroutines.CancellationException) throw error

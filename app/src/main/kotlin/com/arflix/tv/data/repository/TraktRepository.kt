@@ -52,6 +52,7 @@ import okhttp3.Request
 import retrofit2.HttpException
 import java.text.Normalizer
 import java.text.SimpleDateFormat
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
@@ -100,6 +101,7 @@ class TraktRepository @Inject constructor(
     private fun refreshTokenKey() = profileManager.profileStringKey("trakt_refresh_token")
     private fun expiresAtKey() = profileManager.profileLongKey("trakt_expires_at")
     private fun tokenUpdatedAtKey() = profileManager.profileLongKey("trakt_token_updated_at_v3")
+    private fun refreshFailureKey() = profileManager.profileStringKey("trakt_last_refresh_failure_v1")
     private fun includeSpecialsKey() = profileManager.profileBooleanKey("trakt_include_specials")
     private fun dismissedContinueWatchingKey() = profileManager.profileStringKey("trakt_dismissed_continue_watching_v1")
     // v5 invalidates snapshots written by the old 50-show/18-month resolver.
@@ -127,6 +129,27 @@ class TraktRepository @Inject constructor(
         val expiresAt: Long? = null,
         val updatedAt: Long? = null
     )
+
+    /** Safe, token-free diagnostics for investigating profile-scoped auth issues. */
+    data class TraktAuthDiagnostics(
+        val profileId: String,
+        val profileName: String,
+        val accessTokenPresent: Boolean,
+        val refreshTokenPresent: Boolean,
+        val accessTokenFingerprint: String? = null,
+        val refreshTokenFingerprint: String? = null,
+        val expiresAtSeconds: Long?,
+        val tokenUpdatedAtMs: Long?,
+        val refreshFailure: String? = null
+    )
+
+    private fun tokenFingerprint(token: String?): String? {
+        val value = token?.takeIf { it.isNotBlank() } ?: return null
+        return MessageDigest.getInstance("SHA-256")
+            .digest(value.toByteArray())
+            .take(6)
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
 
     @Volatile private var activeCacheProfileId: String? = null
     @Volatile private var cachedContinueWatching: List<ContinueWatchingItem> = emptyList()
@@ -211,6 +234,23 @@ class TraktRepository @Inject constructor(
         return formatter.format(expirationDate)
     }
 
+    suspend fun getAuthDiagnostics(): TraktAuthDiagnostics {
+        ensureProfileCacheScope()
+        val profileId = currentProfileId()
+        val prefs = context.traktDataStore.data.first()
+        return TraktAuthDiagnostics(
+            profileId = profileId,
+            profileName = profileManager.getProfileNameSync(),
+            accessTokenPresent = !prefs[accessTokenKey()].isNullOrBlank(),
+            refreshTokenPresent = !prefs[refreshTokenKey()].isNullOrBlank(),
+            accessTokenFingerprint = tokenFingerprint(prefs[accessTokenKey()]),
+            refreshTokenFingerprint = tokenFingerprint(prefs[refreshTokenKey()]),
+            expiresAtSeconds = prefs[expiresAtKey()],
+            tokenUpdatedAtMs = prefs[tokenUpdatedAtKey()],
+            refreshFailure = prefs[refreshFailureKey()]
+        )
+    }
+
     private val deviceActivation = TraktDeviceActivation()
 
     suspend fun getDeviceCode(): TraktDeviceCode = deviceActivation.request {
@@ -292,15 +332,18 @@ class TraktRepository @Inject constructor(
             try {
                 val newToken = refreshTraktToken(lockedRefreshToken)
                 saveToken(newToken)
+                context.traktDataStore.edit { prefs -> prefs.remove(refreshFailureKey()) }
                 tokenRefreshBackoffUntilMs = 0L
                 newToken.accessToken
             } catch (e: HttpException) {
                 val code = e.code()
-                if (code == 401 || code == 403) {
+                val failure = refreshFailureDescription(e)
+                if (code == 400 || code == 401 || code == 403) {
                     // A rejected refresh token cannot recover automatically.
                     // Keeping it made the UI report Trakt as connected while
                     // Continue Watching silently fell back to an old snapshot.
                     invalidateStoredTraktSession()
+                    recordRefreshFailure(failure)
                     return@withLock null
                 }
                 val retryAfterMs = e.response()
@@ -311,19 +354,40 @@ class TraktRepository @Inject constructor(
                     ?.coerceAtLeast(30_000L)
                     ?: TOKEN_REFRESH_RETRY_BACKOFF_MS
                 tokenRefreshBackoffUntilMs = System.currentTimeMillis() + retryAfterMs
-                // A refresh response can fail because of a temporary proxy, client,
-                // rate-limit or Trakt-side problem. Never turn that network response
-                // into a local logout; only an explicit user disconnect removes tokens.
+                // A non-auth refresh response can fail because of a temporary proxy,
+                // rate-limit or Trakt-side problem. Keep the expired session for a
+                // later retry, but expose the failure to the profile diagnostics.
                 System.err.println("TraktRepo: token refresh deferred after HTTP $code")
+                recordRefreshFailure(failure)
                 usableExistingToken()
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
 
                 System.err.println("TraktRepo: token refresh failed: ${e.message}")
                 tokenRefreshBackoffUntilMs = System.currentTimeMillis() + TOKEN_REFRESH_RETRY_BACKOFF_MS
+                recordRefreshFailure(e::class.java.simpleName.ifBlank { "Unknown error" })
                 usableExistingToken()
             }
         }
+    }
+
+    private suspend fun recordRefreshFailure(failure: String) {
+        context.traktDataStore.edit { prefs ->
+            prefs[refreshFailureKey()] = failure.take(80)
+        }
+    }
+
+    private fun refreshFailureDescription(error: HttpException): String {
+        val code = error.code()
+        val body = runCatching { error.response()?.errorBody()?.string().orEmpty() }.getOrDefault("")
+        val oauthError = Regex("\\\"error\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
+            .find(body)?.groupValues?.getOrNull(1)
+        val description = Regex("\\\"error_description\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"")
+            .find(body)?.groupValues?.getOrNull(1)
+        return listOfNotNull("HTTP $code", oauthError, description)
+            .joinToString(" ")
+            .replace(Regex("\\s+"), " ")
+            .take(80)
     }
 
     private suspend fun saveToken(token: TraktToken) {
@@ -333,6 +397,7 @@ class TraktRepository @Inject constructor(
             prefs[refreshTokenKey()] = token.refreshToken
             prefs[expiresAtKey()] = token.createdAt + token.expiresIn
             prefs[tokenUpdatedAtKey()] = System.currentTimeMillis()
+            prefs.remove(refreshFailureKey())
         }
     }
 
@@ -343,6 +408,7 @@ class TraktRepository @Inject constructor(
             prefs.remove(refreshTokenKey())
             prefs.remove(expiresAtKey())
             prefs[tokenUpdatedAtKey()] = System.currentTimeMillis()
+            prefs.remove(refreshFailureKey())
         }
         tokenRefreshBackoffUntilMs = 0L
         clearProfileScopedMemoryCaches(clearPreloaded = false)
@@ -367,7 +433,7 @@ class TraktRepository @Inject constructor(
      */
     suspend fun loadTokensFromProfile(traktToken: JsonObject?) {
         // Legacy account-level Supabase trakt_token is intentionally ignored.
-        // Per-profile Trakt tokens are restored through importTokensForProfiles.
+        // Trakt OAuth sessions are device-local and are never restored from cloud.
     }
 
     suspend fun logout() {
@@ -377,6 +443,7 @@ class TraktRepository @Inject constructor(
             prefs.remove(refreshTokenKey())
             prefs.remove(expiresAtKey())
             prefs[tokenUpdatedAtKey()] = System.currentTimeMillis()
+            prefs.remove(refreshFailureKey())
         }
         clearProfileScopedMemoryCaches(clearPreloaded = false)
     }

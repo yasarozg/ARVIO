@@ -351,6 +351,7 @@ fun WatchlistScreen(
         onConfirm = { query = it.trim(); search = false }, onCancel = { search = false })
 }
 
+@Composable
 internal fun watchlistSyncStatusLabel(status: WatchlistRemoteSyncStatus?, languageTag: String): String {
     if (status == null) return "No remote sync attempt on this device yet"
     val attemptedAt = formatAppDateTime(status.attemptedAtMs, languageTag)
@@ -372,7 +373,29 @@ internal fun watchlistSyncStatusLabel(status: WatchlistRemoteSyncStatus?, langua
         WatchlistRemoteSyncOutcome.TIMED_OUT -> "Remote request timed out"
     }
     val lastSuccess = lastSuccessfulAt?.let { "\nLast successful pull: $it" }.orEmpty()
-    return "$outcome · $attemptedAt$counts" + status.detail?.let { "\n$it" }.orEmpty() + lastSuccess
+    val profile = status.profileName?.takeIf { it.isNotBlank() }?.let {
+        "\n${tr("Profile")}: $it (${status.profileId.orEmpty()})"
+    }.orEmpty()
+    val device = status.deviceModel?.takeIf { it.isNotBlank() }?.let { "\n${tr("Device")}: $it" }.orEmpty()
+    val auth = if (status.accessTokenPresent != null || status.refreshTokenPresent != null) {
+        "\n${tr("Tokens")}: access=${if (status.accessTokenPresent == true) tr("present") else tr("missing")}, " +
+            "refresh=${if (status.refreshTokenPresent == true) tr("present") else tr("missing")}"
+    } else ""
+    val fingerprints = buildString {
+        status.accessTokenFingerprint?.let { append("\n${tr("Access fingerprint")}: ").append(it) }
+        status.refreshTokenFingerprint?.let { append("\n${tr("Refresh fingerprint")}: ").append(it) }
+    }
+    val tokenTimes = buildString {
+        status.tokenUpdatedAtMs?.let { append("\n${tr("Token updated")}: ").append(formatAppDateTime(it, languageTag)) }
+        status.tokenExpiresAtSeconds?.let {
+            append("\n${tr("Token expires")}: ").append(formatAppDateTime(it * 1000L, languageTag))
+        }
+    }
+    val refreshFailure = status.refreshFailure?.let {
+        "\n${tr("Refresh failure")}: $it"
+    }.orEmpty()
+    return "$outcome · $attemptedAt$counts" +
+        status.detail?.let { "\n$it" }.orEmpty() + profile + device + auth + fingerprints + tokenTimes + refreshFailure + lastSuccess
 }
 
 @Composable

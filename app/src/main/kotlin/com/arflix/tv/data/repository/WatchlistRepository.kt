@@ -1,6 +1,7 @@
 package com.arflix.tv.data.repository
 
 import android.content.Context
+import android.os.Build
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.arflix.tv.R
@@ -63,7 +64,17 @@ data class WatchlistRemoteSyncStatus(
     val lastSuccessfulAtMs: Long? = null,
     val rawCount: Int? = null,
     val mappedCount: Int? = null,
-    val detail: String? = null
+    val detail: String? = null,
+    val profileId: String? = null,
+    val profileName: String? = null,
+    val deviceModel: String? = null,
+    val accessTokenPresent: Boolean? = null,
+    val refreshTokenPresent: Boolean? = null,
+    val accessTokenFingerprint: String? = null,
+    val refreshTokenFingerprint: String? = null,
+    val tokenExpiresAtSeconds: Long? = null,
+    val tokenUpdatedAtMs: Long? = null,
+    val refreshFailure: String? = null
 )
 
 internal fun normalizeWatchlistArtworkUrl(rawValue: String?, isBackdrop: Boolean): String? {
@@ -144,7 +155,8 @@ class WatchlistRepository @Inject constructor(
         outcome: WatchlistRemoteSyncOutcome,
         rawCount: Int? = null,
         mappedCount: Int? = null,
-        detail: String? = null
+        detail: String? = null,
+        authDiagnostics: TraktRepository.TraktAuthDiagnostics? = null
     ): WatchlistRemoteSyncStatus {
         val profileId = profileManager.getProfileIdSync()
         val now = System.currentTimeMillis()
@@ -164,7 +176,17 @@ class WatchlistRepository @Inject constructor(
                 lastSuccessfulAtMs = if (isSuccessful) now else previous?.lastSuccessfulAtMs,
                 rawCount = rawCount,
                 mappedCount = mappedCount,
-                detail = detail?.take(160)
+                detail = detail?.take(160),
+                profileId = authDiagnostics?.profileId ?: profileId,
+                profileName = authDiagnostics?.profileName ?: profileManager.getProfileNameSync(),
+                deviceModel = "${Build.MANUFACTURER} ${Build.MODEL}".trim(),
+                accessTokenPresent = authDiagnostics?.accessTokenPresent,
+                refreshTokenPresent = authDiagnostics?.refreshTokenPresent,
+                accessTokenFingerprint = authDiagnostics?.accessTokenFingerprint,
+                refreshTokenFingerprint = authDiagnostics?.refreshTokenFingerprint,
+                tokenExpiresAtSeconds = authDiagnostics?.expiresAtSeconds,
+                tokenUpdatedAtMs = authDiagnostics?.tokenUpdatedAtMs,
+                refreshFailure = authDiagnostics?.refreshFailure
             )
             prefs[remoteSyncStatusKeyFor(profileId)] = gson.toJson(saved)
         }
