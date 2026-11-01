@@ -316,6 +316,8 @@ class CloudSyncRepository @Inject constructor(
         val guideRowCount: Int? = null,
         val showBudget: Boolean = true,
         val showEpisodeRatings: Boolean = false,
+        // Nullable so older cloud snapshots do not reset a newer local choice.
+        val showUnairedEpisodes: Boolean? = null,
         val animeEpisodeStructuring: String = AnimeStructuringStyle.BROADCAST.id,
         val iptvFavoritesOnHome: Boolean = true,
         val showLoadingStats: Boolean? = null,
@@ -360,6 +362,8 @@ class CloudSyncRepository @Inject constructor(
         profileManager.profileBooleanKeyFor(profileId, "show_budget_on_home")
     private fun showEpisodeRatingsKeyFor(profileId: String) =
         profileManager.profileBooleanKeyFor(profileId, "show_episode_ratings")
+    private fun showUnairedEpisodesKeyFor(profileId: String) =
+        profileManager.profileBooleanKeyFor(profileId, "show_unaired_episodes")
     private fun iptvFavoritesOnHomeKeyFor(profileId: String) =
         profileManager.profileBooleanKeyFor(profileId, IPTV_FAVORITES_ON_HOME)
     private fun showLoadingStatsKeyFor(profileId: String) =
@@ -698,6 +702,7 @@ class CloudSyncRepository @Inject constructor(
                             ?.takeIf { it in 6..10 } ?: 0,
                         showBudget = prefs[showBudgetKeyFor(profile.id)] ?: true,
                         showEpisodeRatings = prefs[showEpisodeRatingsKeyFor(profile.id)] ?: false,
+                        showUnairedEpisodes = prefs[showUnairedEpisodesKeyFor(profile.id)] ?: false,
                         animeEpisodeStructuring = prefs[animeEpisodeStructuringKeyFor(profile.id)] ?: AnimeStructuringStyle.BROADCAST.id,
                         iptvFavoritesOnHome = prefs[iptvFavoritesOnHomeKeyFor(profile.id)] ?: true,
                         showLoadingStats = prefs[showLoadingStatsKeyFor(profile.id)] ?: true,
@@ -1786,6 +1791,7 @@ class CloudSyncRepository @Inject constructor(
                         }
                         prefs[showBudgetKeyFor(profileId)] = state.showBudget
                         prefs[showEpisodeRatingsKeyFor(profileId)] = state.showEpisodeRatings
+                        state.showUnairedEpisodes?.let { prefs[showUnairedEpisodesKeyFor(profileId)] = it }
                         prefs[animeEpisodeStructuringKeyFor(profileId)] = state.animeEpisodeStructuring.ifBlank { AnimeStructuringStyle.BROADCAST.id }
                         prefs[iptvFavoritesOnHomeKeyFor(profileId)] = state.iptvFavoritesOnHome
                         state.showLoadingStats?.let { prefs[showLoadingStatsKeyFor(profileId)] = it }

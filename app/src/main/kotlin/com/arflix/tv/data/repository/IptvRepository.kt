@@ -367,6 +367,8 @@ data class IptvCloudProfileState(
     val favoriteChannels: List<String> = emptyList(),
     val hiddenGroups: List<String> = emptyList(),
     val lockedGroups: List<String> = emptyList(),
+    // Old cloud snapshots do not have this field; null means preserve local rules.
+    val vpnRequiredGroups: List<String>? = null,
     val groupOrder: List<String> = emptyList(),
     val groupOrderSchema: Int = 0,
     val sortOrder: String = "provider",
@@ -4554,6 +4556,8 @@ class IptvRepository @Inject constructor(
         profileManager.profileStringKeyFor(profileId, "iptv_locked_groups")
     private fun vpnRequiredGroupsKey(): Preferences.Key<String> =
         profileManager.profileStringKey("iptv_vpn_required_groups")
+    private fun vpnRequiredGroupsKeyFor(profileId: String): Preferences.Key<String> =
+        profileManager.profileStringKeyFor(profileId, "iptv_vpn_required_groups")
     private fun groupOrderKey(): Preferences.Key<String> = profileManager.profileStringKey("iptv_group_order")
     private fun groupOrderKeyFor(profileId: String): Preferences.Key<String> =
         profileManager.profileStringKeyFor(profileId, "iptv_group_order")
@@ -4750,6 +4754,7 @@ class IptvRepository @Inject constructor(
         val prefs = context.settingsDataStore.data.first()
         val hiddenRaw = prefs[hiddenGroupsKeyFor(safeProfileId)].orEmpty()
         val lockedRaw = prefs[lockedGroupsKeyFor(safeProfileId)].orEmpty()
+        val vpnRequiredRaw = prefs[vpnRequiredGroupsKeyFor(safeProfileId)].orEmpty()
         val orderRaw = prefs[groupOrderKeyFor(safeProfileId)].orEmpty()
         val orderSchema = prefs[groupOrderSchemaKeyFor(safeProfileId)]?.toIntOrNull() ?: 0
         val playlistsRaw = prefs[playlistsKeyFor(safeProfileId)].orEmpty()
@@ -4789,6 +4794,15 @@ class IptvRepository @Inject constructor(
                     val type = TypeToken.getParameterized(List::class.java, String::class.java).type
                     StalkerPortalSupport.normalizePlaylistGroupKeys(
                         gson.fromJson<List<String>>(lockedRaw, type).orEmpty(),
+                        validSourceIds,
+                    )
+                }.getOrDefault(emptyList())
+            } else emptyList(),
+            vpnRequiredGroups = if (vpnRequiredRaw.isNotBlank()) {
+                runCatching {
+                    val type = TypeToken.getParameterized(List::class.java, String::class.java).type
+                    StalkerPortalSupport.normalizePlaylistGroupKeys(
+                        gson.fromJson<List<String>>(vpnRequiredRaw, type).orEmpty(),
                         validSourceIds,
                     )
                 }.getOrDefault(emptyList())
@@ -4897,6 +4911,7 @@ class IptvRepository @Inject constructor(
         }
         val normalizedHiddenGroups = normalizeCloudGroupKeys(state.hiddenGroups)
         val normalizedLockedGroups = normalizeCloudGroupKeys(state.lockedGroups)
+        val normalizedVpnRequiredGroups = state.vpnRequiredGroups?.let(::normalizeCloudGroupKeys)
         val normalizedGroupOrder = state.groupOrder
             .takeIf { state.groupOrderSchema >= IPTV_GROUP_ORDER_SCHEMA }
             .orEmpty()
@@ -4939,6 +4954,10 @@ class IptvRepository @Inject constructor(
             else prefs[hiddenGroupsKeyFor(safeProfileId)] = gson.toJson(normalizedHiddenGroups)
             if (normalizedLockedGroups.isEmpty()) prefs.remove(lockedGroupsKeyFor(safeProfileId))
             else prefs[lockedGroupsKeyFor(safeProfileId)] = gson.toJson(normalizedLockedGroups)
+            if (normalizedVpnRequiredGroups != null) {
+                if (normalizedVpnRequiredGroups.isEmpty()) prefs.remove(vpnRequiredGroupsKeyFor(safeProfileId))
+                else prefs[vpnRequiredGroupsKeyFor(safeProfileId)] = gson.toJson(normalizedVpnRequiredGroups)
+            }
             if (normalizedGroupOrder.isEmpty()) prefs.remove(groupOrderKeyFor(safeProfileId))
             else prefs[groupOrderKeyFor(safeProfileId)] = gson.toJson(normalizedGroupOrder)
             prefs[groupOrderSchemaKeyFor(safeProfileId)] = IPTV_GROUP_ORDER_SCHEMA.toString()
